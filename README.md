@@ -128,6 +128,41 @@ These fields save with the queue item in Supabase when configured, or local
 fallback otherwise. The Analytics page shows total posted posts, impressions,
 likes, best platform by engagement, and top posts by engagement.
 
+## Instagram sandbox scaffolding
+
+The `Connections` page includes an Instagram sandbox setup panel. This is
+planning and validation scaffolding only: real Instagram publishing, OAuth, and
+real Conduit account connections are still disabled.
+
+Sandbox account requirements before future API testing:
+
+- Instagram account is Business/Professional.
+- Instagram account is connected to a Facebook Page.
+- Meta Developer App exists.
+- Redirect URL is configured in the Meta app.
+- Required Instagram Graph API permissions are configured.
+- Sandbox access token is available.
+
+Optional server-side env vars for future dry-run identity checks:
+
+```bash
+INSTAGRAM_SANDBOX_META_APP_ID=
+INSTAGRAM_SANDBOX_BUSINESS_ACCOUNT_ID=
+INSTAGRAM_SANDBOX_FACEBOOK_PAGE_ID=
+INSTAGRAM_SANDBOX_ACCESS_TOKEN=
+```
+
+The UI does not store real token values. It stores only token availability
+status and setup metadata in `social_connections`. Prefer server-side env vars
+for sandbox secrets. The current API routes are dry-run placeholders:
+
+- `GET /api/integrations/instagram/status`
+- `POST /api/integrations/instagram/test-identity`
+- `POST /api/integrations/instagram/test-publish-dry-run`
+
+Manual publishing remains the production workflow: copy the caption, download
+media, open Instagram, publish manually, paste the live URL, and enter metrics.
+
 ## Website fetching for Company Knowledge
 
 Company Knowledge items can pull text from normal public website, blog, and
@@ -374,3 +409,4 @@ fallback remains available for approval memory and Ready to Post queue items.
 - Company Knowledge can extract plain text/Markdown/transcript files and some readable PDFs; DOCX needs a parser later
 - Media Library can analyze images; video/audio transcription and frame analysis are placeholders for now
 - Basic Supabase Auth and workspace permissions are in place, but social account OAuth/publishing permissions are not connected yet
+- Instagram sandbox scaffolding is available for setup/dry-run checks only; real publishing is disabled

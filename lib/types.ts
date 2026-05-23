@@ -132,6 +132,39 @@ export type MediaAsset = {
   notes?: string;
 };
 
+export type SocialConnection = {
+  id: string;
+  provider: "instagram";
+  accountLabel: string;
+  accountId: string;
+  pageId: string;
+  accessTokenStatus:
+    | "Not provided"
+    | "Available but not stored"
+    | "Use server env var"
+    | "Placeholder only";
+  status:
+    | "Sandbox setup available"
+    | "Sandbox configured"
+    | "Test publishing not enabled"
+    | "Test publishing enabled";
+  isSandbox: boolean;
+  metadata: {
+    metaAppId?: string;
+    tokenExpirationDate?: string;
+    notes?: string;
+    businessAccountReady?: boolean;
+    facebookPageConnected?: boolean;
+    metaAppExists?: boolean;
+    redirectUrlConfigured?: boolean;
+    permissionsConfigured?: boolean;
+    accessTokenAvailable?: boolean;
+    testPublishingEnabled?: boolean;
+  };
+  createdAt: string;
+  updatedAt: string;
+};
+
 export type GeneratedPost = {
   id: string;
   platform: Platform;

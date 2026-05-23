@@ -14,7 +14,8 @@ const appTables = [
   "post_queue",
   "media_files",
   "media_library",
-  "post_feedback"
+  "post_feedback",
+  "social_connections"
 ];
 
 export async function GET() {

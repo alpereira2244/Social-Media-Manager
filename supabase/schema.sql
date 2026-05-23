@@ -200,6 +200,21 @@ create table if not exists post_queue (
 create unique index if not exists post_queue_generated_post_id_idx
 on post_queue(generated_post_id);
 
+create table if not exists social_connections (
+  id text primary key,
+  workspace_id text references workspaces(id) on delete cascade,
+  provider text not null,
+  account_label text,
+  account_id text,
+  page_id text,
+  access_token_encrypted_or_placeholder text,
+  status text default 'Sandbox setup available',
+  is_sandbox boolean default true,
+  metadata_json jsonb default '{}'::jsonb,
+  created_at timestamptz default now(),
+  updated_at timestamptz default now()
+);
+
 -- Keep existing projects compatible with the current app shape.
 alter table profiles add column if not exists workspace_id text references workspaces(id) on delete cascade;
 alter table profiles add column if not exists role_title text;
@@ -315,6 +330,18 @@ alter table post_queue add column if not exists planned_at timestamptz;
 alter table post_queue add column if not exists created_at timestamptz default now();
 alter table post_queue add column if not exists updated_at timestamptz default now();
 
+alter table social_connections add column if not exists workspace_id text references workspaces(id) on delete cascade;
+alter table social_connections add column if not exists provider text;
+alter table social_connections add column if not exists account_label text;
+alter table social_connections add column if not exists account_id text;
+alter table social_connections add column if not exists page_id text;
+alter table social_connections add column if not exists access_token_encrypted_or_placeholder text;
+alter table social_connections add column if not exists status text default 'Sandbox setup available';
+alter table social_connections add column if not exists is_sandbox boolean default true;
+alter table social_connections add column if not exists metadata_json jsonb default '{}'::jsonb;
+alter table social_connections add column if not exists created_at timestamptz default now();
+alter table social_connections add column if not exists updated_at timestamptz default now();
+
 -- Authenticated workspace-scoped MVP RLS strategy:
 -- Anonymous access is disabled for app data. Signed-in users can read rows for
 -- workspaces they belong to. owner/admin/editor can write; viewer is read-only.
@@ -360,6 +387,7 @@ alter table media_library enable row level security;
 alter table approved_posts enable row level security;
 alter table rejected_posts enable row level security;
 alter table post_queue enable row level security;
+alter table social_connections enable row level security;
 
 revoke select, insert, update, delete on table
   workspaces,
@@ -374,7 +402,8 @@ revoke select, insert, update, delete on table
   media_library,
   approved_posts,
   rejected_posts,
-  post_queue
+  post_queue,
+  social_connections
 from anon;
 
 grant usage on schema public to authenticated;
@@ -391,7 +420,8 @@ grant select, insert, update, delete on table
   media_library,
   approved_posts,
   rejected_posts,
-  post_queue
+  post_queue,
+  social_connections
 to authenticated;
 
 -- Remove earlier internal-MVP anon policies if they exist.
@@ -439,6 +469,10 @@ drop policy if exists "scc anon select" on post_queue;
 drop policy if exists "scc anon insert" on post_queue;
 drop policy if exists "scc anon update" on post_queue;
 drop policy if exists "scc anon delete" on post_queue;
+drop policy if exists "scc anon select" on social_connections;
+drop policy if exists "scc anon insert" on social_connections;
+drop policy if exists "scc anon update" on social_connections;
+drop policy if exists "scc anon delete" on social_connections;
 
 drop policy if exists "workspace select" on workspaces;
 drop policy if exists "workspace insert" on workspaces;
@@ -556,6 +590,15 @@ create policy "scc workspace select" on post_queue for select to authenticated u
 create policy "scc workspace insert" on post_queue for insert to authenticated with check (public.scc_can_write_workspace(workspace_id));
 create policy "scc workspace update" on post_queue for update to authenticated using (public.scc_can_write_workspace(workspace_id) or workspace_id is null) with check (public.scc_can_write_workspace(workspace_id));
 create policy "scc workspace delete" on post_queue for delete to authenticated using (public.scc_can_write_workspace(workspace_id));
+
+drop policy if exists "scc workspace select" on social_connections;
+drop policy if exists "scc workspace insert" on social_connections;
+drop policy if exists "scc workspace update" on social_connections;
+drop policy if exists "scc workspace delete" on social_connections;
+create policy "scc workspace select" on social_connections for select to authenticated using (workspace_id is null or public.scc_is_workspace_member(workspace_id));
+create policy "scc workspace insert" on social_connections for insert to authenticated with check (public.scc_can_write_workspace(workspace_id));
+create policy "scc workspace update" on social_connections for update to authenticated using (public.scc_can_write_workspace(workspace_id) or workspace_id is null) with check (public.scc_can_write_workspace(workspace_id));
+create policy "scc workspace delete" on social_connections for delete to authenticated using (public.scc_can_write_workspace(workspace_id));
 
 insert into storage.buckets (id, name, public)
 values ('campaign-media', 'campaign-media', true)

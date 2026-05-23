@@ -12,7 +12,8 @@ import type {
   Platform,
   PostQueueItem,
   Profile,
-  RejectedPostMemory
+  RejectedPostMemory,
+  SocialConnection
 } from "@/lib/types";
 
 export type StorageMode = "local" | "supabase";
@@ -51,6 +52,7 @@ export type PersistedAppData = {
   rejectedPosts: RejectedPostMemory[];
   postQueue: PostQueueItem[];
   mediaAssets: MediaAsset[];
+  socialConnections: SocialConnection[];
   postQueueLoadError?: string;
 };
 
@@ -98,6 +100,21 @@ type GeneratedPostRow = {
   } | null;
   status: "draft" | "approved" | "rejected";
   previous_versions_json: string[] | null;
+};
+
+type SocialConnectionRow = {
+  id: string;
+  workspace_id?: string | null;
+  provider: "instagram";
+  account_label: string | null;
+  account_id: string | null;
+  page_id: string | null;
+  access_token_encrypted_or_placeholder: string | null;
+  status: SocialConnection["status"] | null;
+  is_sandbox: boolean | null;
+  metadata_json: SocialConnection["metadata"] | null;
+  created_at: string;
+  updated_at: string;
 };
 
 export function appUsesSupabase() {
@@ -222,7 +239,8 @@ export async function loadSupabaseData(workspaceId = workspaceIdOrThrow()): Prom
     approvedPostsResult,
     rejectedPostsResult,
     postQueueResult,
-    mediaAssetsResult
+    mediaAssetsResult,
+    socialConnectionsResult
   ] = await Promise.all([
     scopedSelect(supabase.from("profiles").select("*"), workspaceId).order("created_at", { ascending: false }),
     supabase
@@ -256,6 +274,12 @@ export async function loadSupabaseData(workspaceId = workspaceIdOrThrow()): Prom
       .select("*")
       .or(`workspace_id.eq.${workspaceId},workspace_id.is.null`)
       .order("uploaded_at", { ascending: false })
+      .limit(100),
+    supabase
+      .from("social_connections")
+      .select("*")
+      .or(`workspace_id.eq.${workspaceId},workspace_id.is.null`)
+      .order("updated_at", { ascending: false })
       .limit(100)
   ]);
 
@@ -350,6 +374,9 @@ export async function loadSupabaseData(workspaceId = workspaceIdOrThrow()): Prom
     mediaAssets: mediaAssetsResult.error
       ? []
       : (mediaAssetsResult.data ?? []).map(mediaAssetFromRow),
+    socialConnections: socialConnectionsResult.error
+      ? []
+      : (socialConnectionsResult.data ?? []).map(socialConnectionFromRow),
     postQueueLoadError: postQueueResult.error?.message
   };
 }
@@ -618,6 +645,14 @@ export async function saveMediaAssetToSupabase(asset: MediaAsset, file?: File | 
   if (error) throw new Error(error.message);
 
   return storedAsset;
+}
+
+export async function saveSocialConnectionToSupabase(connection: SocialConnection) {
+  const supabase = getBrowserSupabaseClient();
+  if (!supabase) return;
+
+  const { error } = await supabase.from("social_connections").upsert(socialConnectionToRow(connection));
+  if (error) throw new Error(error.message);
 }
 
 export async function deleteMediaAssetFromSupabase(id: string) {
@@ -1128,5 +1163,51 @@ function mediaAssetFromRow(row: any): MediaAsset {
     altText: row.alt_text ?? undefined,
     tags: row.tags ?? [],
     notes: row.notes ?? undefined
+  };
+}
+
+function socialConnectionToRow(connection: SocialConnection) {
+  return {
+    id: connection.id,
+    workspace_id: workspaceIdOrThrow(),
+    provider: connection.provider,
+    account_label: connection.accountLabel,
+    account_id: connection.accountId || null,
+    page_id: connection.pageId || null,
+    access_token_encrypted_or_placeholder: connection.accessTokenStatus,
+    status: connection.status,
+    is_sandbox: connection.isSandbox,
+    metadata_json: connection.metadata ?? {},
+    created_at: connection.createdAt,
+    updated_at: new Date().toISOString()
+  };
+}
+
+function socialConnectionFromRow(row: SocialConnectionRow): SocialConnection {
+  const metadata = row.metadata_json ?? {};
+  const accessTokenStatus = row.access_token_encrypted_or_placeholder;
+
+  return {
+    id: row.id,
+    provider: row.provider ?? "instagram",
+    accountLabel: row.account_label ?? "Instagram Sandbox",
+    accountId: row.account_id ?? "",
+    pageId: row.page_id ?? "",
+    accessTokenStatus:
+      accessTokenStatus === "Available but not stored" ||
+      accessTokenStatus === "Use server env var" ||
+      accessTokenStatus === "Placeholder only"
+        ? accessTokenStatus
+        : "Not provided",
+    status:
+      row.status === "Sandbox configured" ||
+      row.status === "Test publishing not enabled" ||
+      row.status === "Test publishing enabled"
+        ? row.status
+        : "Sandbox setup available",
+    isSandbox: Boolean(row.is_sandbox),
+    metadata,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at
   };
 }

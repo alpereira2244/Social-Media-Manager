@@ -62,6 +62,7 @@ import type {
   ProfileType,
   RejectedPostMemory,
   SimpleStyleChip,
+  SocialConnection,
   SourceUrlType,
   SyncStatus,
   VoiceAnalysis,
@@ -90,6 +91,7 @@ import {
   savePostQueueItemToSupabase,
   saveProfileToSupabase,
   saveRejectedPostToSupabase,
+  saveSocialConnectionToSupabase,
   sendPasswordResetEmail,
   signInWithPassword,
   signOutOfSupabase,
@@ -435,7 +437,8 @@ const storageKeys = {
   approvedPosts: "scc.approvedPosts",
   rejectedPosts: "scc.rejectedPosts",
   postQueue: "scc.postQueue",
-  useApprovedPosts: "scc.useApprovedPosts"
+  useApprovedPosts: "scc.useApprovedPosts",
+  socialConnections: "scc.socialConnections"
 };
 
 const acceptedMediaTypes = [
@@ -1775,6 +1778,7 @@ export function SocialCommandCenter() {
   const [librarySources, setLibrarySources] =
     useState<LibrarySource[]>(initialLibrarySources);
   const [mediaAssets, setMediaAssets] = useState<MediaAsset[]>([]);
+  const [socialConnections, setSocialConnections] = useState<SocialConnection[]>([]);
   const [selectedLibrarySourceIds, setSelectedLibrarySourceIds] = useState<string[]>(
     initialLibrarySources[0] ? [initialLibrarySources[0].id] : []
   );
@@ -1865,6 +1869,7 @@ export function SocialCommandCenter() {
       );
       setLibrarySources(savedLibrarySources);
       setMediaAssets(readLocalValue<MediaAsset[]>(storageKeys.mediaAssets, []));
+      setSocialConnections(readLocalValue<SocialConnection[]>(storageKeys.socialConnections, []));
       setSelectedLibrarySourceIds(
         savedLibrarySources[0] ? [savedLibrarySources[0].id] : []
       );
@@ -1925,6 +1930,7 @@ export function SocialCommandCenter() {
         setSelectedProfileId(findDefaultPostingAccount(data.profiles)?.id ?? data.profiles[0]?.id ?? "");
         setLibrarySources(data.librarySources);
         setMediaAssets(data.mediaAssets);
+        setSocialConnections(data.socialConnections);
         setSelectedLibrarySourceIds(
           data.librarySources[0] ? [data.librarySources[0].id] : []
         );
@@ -2058,6 +2064,14 @@ export function SocialCommandCenter() {
       return;
     }
 
+    writeLocalValue(storageKeys.socialConnections, socialConnections);
+  }, [socialConnections, hasLoadedLocalData, storageMode]);
+
+  useEffect(() => {
+    if (!hasLoadedLocalData || storageMode !== "local") {
+      return;
+    }
+
     writeLocalValue(storageKeys.approvedPosts, approvedPosts);
   }, [approvedPosts, hasLoadedLocalData, storageMode]);
 
@@ -2088,6 +2102,13 @@ export function SocialCommandCenter() {
   const activeCampaign = useMemo(
     () => campaigns.find((campaign) => campaign.id === activeCampaignId) ?? campaigns[0],
     [activeCampaignId, campaigns]
+  );
+  const instagramSandboxConnection = useMemo(
+    () =>
+      socialConnections.find(
+        (connection) => connection.provider === "instagram" && connection.isSandbox
+      ),
+    [socialConnections]
   );
   const activeCampaignComplete = isCampaignComplete(activeCampaign, postQueue);
 
@@ -3566,6 +3587,21 @@ export function SocialCommandCenter() {
     }
   }
 
+  function saveSocialConnection(connection: SocialConnection) {
+    setSocialConnections((current) => mergeById([connection], current));
+    if (storageMode === "supabase") {
+      saveSocialConnectionToSupabase(connection).catch((error) => {
+        writeLocalValue(storageKeys.socialConnections, mergeById([connection], socialConnections));
+        setQueueDebugMessage(
+          error instanceof Error
+            ? `Instagram sandbox config sync failed: ${error.message}`
+            : "Instagram sandbox config sync failed."
+        );
+        setGenerationNotice("Instagram sandbox settings saved locally. Shared sync needs attention.");
+      });
+    }
+  }
+
   function removeMediaAsset(assetId: string) {
     setMediaAssets((current) => current.filter((asset) => asset.id !== assetId));
     if (selectedMediaAssetId === assetId) {
@@ -3795,7 +3831,10 @@ export function SocialCommandCenter() {
             <Analytics postQueue={postQueue} setScreen={setScreen} />
           )}
           {screen === "Connections" && (
-            <Connections />
+            <Connections
+              instagramSandboxConnection={instagramSandboxConnection}
+              saveInstagramSandboxConnection={saveSocialConnection}
+            />
           )}
           {screen === "Content Library" && (
             <ContentLibrary
@@ -3964,6 +4003,7 @@ export function SocialCommandCenter() {
               activeCampaignComplete={activeCampaignComplete}
               startNewPost={startNewPost}
               repurposeCampaign={openRepurposeCampaign}
+              instagramSandboxConfigured={Boolean(instagramSandboxConnection)}
             />
           )}
           {screen === "Review Drafts" && (
@@ -4591,9 +4631,9 @@ const connectionCards = [
   },
   {
     name: "Instagram",
-    status: "Ready for sandbox manual test",
+    status: "Sandbox setup available",
     today: "Generate captions, overlay ideas, and media-aware previews for manual posting.",
-    later: "Test scheduling/publishing through the Meta/Instagram Graph API.",
+    later: "Configure a low-risk sandbox and dry-run the Meta/Instagram Graph API payload before real publishing.",
     notes: "Use the test Instagram account manually first. Do not connect real accounts until auth, permissions, and posting workflow are confirmed."
   },
   {
@@ -4634,13 +4674,21 @@ const connectionCards = [
 ];
 
 function connectionStatusClass(status: string) {
-  if (status.includes("active") || status.includes("Manual metrics")) return "bg-teal-100 text-primary";
-  if (status.includes("sandbox")) return "bg-blue-100 text-blue-800";
-  if (status.includes("soon")) return "bg-amber-100 text-amber-800";
+  const normalized = status.toLowerCase();
+  if (normalized.includes("active") || normalized.includes("manual metrics")) return "bg-teal-100 text-primary";
+  if (normalized.includes("sandbox")) return "bg-blue-100 text-blue-800";
+  if (normalized.includes("soon")) return "bg-amber-100 text-amber-800";
   return "bg-slate-100 text-slate-600";
 }
 
-function Connections() {
+function Connections({
+  instagramSandboxConnection,
+  saveInstagramSandboxConnection
+}: {
+  instagramSandboxConnection?: SocialConnection;
+  saveInstagramSandboxConnection: (connection: SocialConnection) => void;
+}) {
+  const [showInstagramSetup, setShowInstagramSetup] = useState(Boolean(instagramSandboxConnection));
   const currentWorkflow = [
     "Generate post",
     "Approve to Ready to Post",
@@ -4705,10 +4753,29 @@ function Connections() {
               <div className="rounded-md bg-slate-50 p-3 text-muted-foreground">
                 {card.notes}
               </div>
+              {card.name === "Instagram" && (
+                <div className="space-y-2">
+                  <Button size="sm" onClick={() => setShowInstagramSetup((current) => !current)}>
+                    {showInstagramSetup ? "Hide sandbox setup" : "Open sandbox setup"}
+                  </Button>
+                  {instagramSandboxConnection && (
+                    <p className="text-xs font-semibold text-primary">
+                      Sandbox config saved · {instagramSandboxConnection.status}
+                    </p>
+                  )}
+                </div>
+              )}
             </div>
           </Card>
         ))}
       </div>
+
+      {showInstagramSetup && (
+        <InstagramSandboxSetupPanel
+          connection={instagramSandboxConnection}
+          onSave={saveInstagramSandboxConnection}
+        />
+      )}
 
       <div className="grid gap-5 lg:grid-cols-2">
         <WorkflowCard title="Current workflow" items={currentWorkflow} />
@@ -4732,6 +4799,226 @@ function Connections() {
         </div>
       </Card>
     </div>
+  );
+}
+
+function InstagramSandboxSetupPanel({
+  connection,
+  onSave
+}: {
+  connection?: SocialConnection;
+  onSave: (connection: SocialConnection) => void;
+}) {
+  const metadata = connection?.metadata ?? {};
+  const [form, setForm] = useState({
+    metaAppId: metadata.metaAppId ?? "",
+    instagramBusinessAccountId: connection?.accountId ?? "",
+    facebookPageId: connection?.pageId ?? "",
+    accessTokenInput: "",
+    accessTokenAvailable:
+      metadata.accessTokenAvailable ||
+      connection?.accessTokenStatus === "Available but not stored" ||
+      connection?.accessTokenStatus === "Use server env var",
+    tokenExpirationDate: metadata.tokenExpirationDate ?? "",
+    notes: metadata.notes ?? "",
+    businessAccountReady: Boolean(metadata.businessAccountReady),
+    facebookPageConnected: Boolean(metadata.facebookPageConnected),
+    metaAppExists: Boolean(metadata.metaAppExists),
+    redirectUrlConfigured: Boolean(metadata.redirectUrlConfigured),
+    permissionsConfigured: Boolean(metadata.permissionsConfigured),
+    testPublishingEnabled: Boolean(metadata.testPublishingEnabled)
+  });
+  const [statusMessage, setStatusMessage] = useState("");
+  const [dryRunMessage, setDryRunMessage] = useState("");
+
+  const checklist = [
+    ["businessAccountReady", "Instagram account is Business/Professional"],
+    ["facebookPageConnected", "Instagram account is connected to a Facebook Page"],
+    ["metaAppExists", "Meta Developer App exists"],
+    ["redirectUrlConfigured", "Redirect URL configured"],
+    ["permissionsConfigured", "Required permissions configured"],
+    ["accessTokenAvailable", "Access token available"],
+    ["testPublishingEnabled", form.testPublishingEnabled ? "Test publishing enabled" : "Test publishing not enabled yet"]
+  ] as const;
+
+  function updateField(field: keyof typeof form, value: string | boolean) {
+    setForm((current) => ({ ...current, [field]: value }));
+  }
+
+  function handleSave(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const now = new Date().toISOString();
+    const hasTokenSignal = form.accessTokenAvailable || form.accessTokenInput.trim().length > 0;
+    const nextConnection: SocialConnection = {
+      id: connection?.id ?? "instagram-sandbox",
+      provider: "instagram",
+      accountLabel: "Instagram Sandbox",
+      accountId: form.instagramBusinessAccountId.trim(),
+      pageId: form.facebookPageId.trim(),
+      accessTokenStatus: hasTokenSignal ? "Available but not stored" : "Not provided",
+      status: form.testPublishingEnabled ? "Test publishing enabled" : "Test publishing not enabled",
+      isSandbox: true,
+      metadata: {
+        metaAppId: form.metaAppId.trim(),
+        tokenExpirationDate: form.tokenExpirationDate,
+        notes: form.notes.trim(),
+        businessAccountReady: form.businessAccountReady,
+        facebookPageConnected: form.facebookPageConnected,
+        metaAppExists: form.metaAppExists,
+        redirectUrlConfigured: form.redirectUrlConfigured,
+        permissionsConfigured: form.permissionsConfigured,
+        accessTokenAvailable: hasTokenSignal,
+        testPublishingEnabled: form.testPublishingEnabled
+      },
+      createdAt: connection?.createdAt ?? now,
+      updatedAt: now
+    };
+
+    onSave(nextConnection);
+    setForm((current) => ({ ...current, accessTokenInput: "", accessTokenAvailable: hasTokenSignal }));
+    setStatusMessage("Instagram sandbox settings saved. Real publishing remains disabled.");
+    window.setTimeout(() => setStatusMessage(""), 2400);
+  }
+
+  async function runDryRun() {
+    setDryRunMessage("Running dry-run...");
+    try {
+      const response = await fetch("/api/integrations/instagram/test-publish-dry-run", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          accountId: form.instagramBusinessAccountId,
+          pageId: form.facebookPageId,
+          metaAppId: form.metaAppId,
+          hasAccessToken: form.accessTokenAvailable || form.accessTokenInput.trim().length > 0,
+          postCopy: "Sandbox dry-run caption. No real post should be published.",
+          mediaUrl: ""
+        })
+      });
+      const payload = await response.json();
+      setDryRunMessage(payload?.message ?? "Dry-run completed. No post was published.");
+    } catch {
+      setDryRunMessage("Dry-run route is unavailable. Manual publishing remains active.");
+    }
+  }
+
+  return (
+    <Card className="border-blue-200 bg-blue-50/50 p-6">
+      <div className="flex flex-col justify-between gap-4 lg:flex-row lg:items-start">
+        <div>
+          <p className="text-xs font-extrabold uppercase tracking-[0.16em] text-blue-800">Instagram Sandbox Setup</p>
+          <h3 className="mt-2 text-2xl font-extrabold tracking-tight">Configure a test account without enabling publishing</h3>
+          <p className="mt-2 max-w-3xl text-sm leading-6 text-muted-foreground">
+            Sandbox only. Do not connect real Conduit accounts yet. Manual publishing remains the production workflow for now.
+          </p>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          <Pill>Sandbox only</Pill>
+          <Pill>Dry-run only</Pill>
+          <Pill>No OAuth yet</Pill>
+        </div>
+      </div>
+
+      <div className="mt-5 grid gap-5 lg:grid-cols-[0.8fr_1.2fr]">
+        <div className="rounded-xl border border-blue-100 bg-white p-4 shadow-sm">
+          <h4 className="font-bold">Readiness checklist</h4>
+          <div className="mt-3 grid gap-2">
+            {checklist.map(([field, label]) => (
+              <label key={field} className="flex items-center gap-3 rounded-lg bg-slate-50 p-3 text-sm font-semibold">
+                <input
+                  type="checkbox"
+                  checked={Boolean(form[field])}
+                  onChange={(event) => updateField(field, event.target.checked)}
+                />
+                <span>{label}</span>
+              </label>
+            ))}
+          </div>
+          <p className="mt-4 rounded-md border border-amber-200 bg-amber-50 p-3 text-sm font-semibold text-amber-800">
+            Token storage should be secured before using real accounts. This MVP stores token status only, not the token value.
+          </p>
+        </div>
+
+        <form onSubmit={handleSave} className="rounded-xl border border-blue-100 bg-white p-4 shadow-sm">
+          <div className="grid gap-4 md:grid-cols-2">
+            <div>
+              <FieldLabel label="Meta App ID" htmlFor="instagram-meta-app-id" />
+              <input
+                id="instagram-meta-app-id"
+                value={form.metaAppId}
+                onChange={(event) => updateField("metaAppId", event.target.value)}
+                className="mt-2 h-10 w-full rounded-md border border-input bg-white px-3 text-sm outline-none focus:ring-2 focus:ring-ring"
+                placeholder="1234567890"
+              />
+            </div>
+            <div>
+              <FieldLabel label="Instagram Business Account ID" htmlFor="instagram-business-account-id" />
+              <input
+                id="instagram-business-account-id"
+                value={form.instagramBusinessAccountId}
+                onChange={(event) => updateField("instagramBusinessAccountId", event.target.value)}
+                className="mt-2 h-10 w-full rounded-md border border-input bg-white px-3 text-sm outline-none focus:ring-2 focus:ring-ring"
+                placeholder="1784..."
+              />
+            </div>
+            <div>
+              <FieldLabel label="Facebook Page ID" htmlFor="instagram-facebook-page-id" />
+              <input
+                id="instagram-facebook-page-id"
+                value={form.facebookPageId}
+                onChange={(event) => updateField("facebookPageId", event.target.value)}
+                className="mt-2 h-10 w-full rounded-md border border-input bg-white px-3 text-sm outline-none focus:ring-2 focus:ring-ring"
+                placeholder="Page ID"
+              />
+            </div>
+            <div>
+              <FieldLabel label="Token expiration date" htmlFor="instagram-token-expiration" />
+              <input
+                id="instagram-token-expiration"
+                type="date"
+                value={form.tokenExpirationDate}
+                onChange={(event) => updateField("tokenExpirationDate", event.target.value)}
+                className="mt-2 h-10 w-full rounded-md border border-input bg-white px-3 text-sm outline-none focus:ring-2 focus:ring-ring"
+              />
+            </div>
+            <div className="md:col-span-2">
+              <FieldLabel label="Access Token" htmlFor="instagram-access-token" />
+              <input
+                id="instagram-access-token"
+                value={form.accessTokenInput}
+                onChange={(event) => updateField("accessTokenInput", event.target.value)}
+                className="mt-2 h-10 w-full rounded-md border border-input bg-white px-3 text-sm outline-none focus:ring-2 focus:ring-ring"
+                placeholder="Do not paste real production tokens here. Token status only is saved."
+              />
+              <p className="mt-2 text-xs font-semibold text-muted-foreground">
+                Prefer server-side env vars for sandbox tokens. This form clears token text after saving.
+              </p>
+            </div>
+            <div className="md:col-span-2">
+              <FieldLabel label="Notes" htmlFor="instagram-sandbox-notes" />
+              <textarea
+                id="instagram-sandbox-notes"
+                value={form.notes}
+                onChange={(event) => updateField("notes", event.target.value)}
+                className="mt-2 min-h-[90px] w-full rounded-md border border-input bg-white px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-ring"
+                placeholder="Sandbox account name, Meta app notes, permission notes..."
+              />
+            </div>
+          </div>
+          <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
+            <div className="text-sm font-semibold text-primary">
+              {statusMessage || dryRunMessage}
+            </div>
+            <div className="flex flex-wrap gap-2">
+              <Button type="button" variant="secondary" onClick={runDryRun}>
+                Test dry-run
+              </Button>
+              <Button type="submit">Save sandbox config</Button>
+            </div>
+          </div>
+        </form>
+      </div>
+    </Card>
   );
 }
 
@@ -11279,7 +11566,8 @@ function PostQueue({
   activeCampaign,
   activeCampaignComplete,
   startNewPost,
-  repurposeCampaign
+  repurposeCampaign,
+  instagramSandboxConfigured
 }: {
   queue: PostQueueItem[];
   campaigns: Campaign[];
@@ -11293,6 +11581,7 @@ function PostQueue({
   activeCampaignComplete: boolean;
   startNewPost: () => void;
   repurposeCampaign: (campaign: Campaign) => void;
+  instagramSandboxConfigured: boolean;
 }) {
   const [platformFilter, setPlatformFilter] = useState<Platform | "All">("All");
   const [profileFilter, setProfileFilter] = useState("All");
@@ -11477,6 +11766,7 @@ function PostQueue({
                   campaign={campaigns.find((campaign) => campaign.id === item.campaignId)}
                   updateQueueItem={updateQueueItem}
                   mediaPreviewUrl={mediaPreviewUrl}
+                  instagramSandboxConfigured={instagramSandboxConfigured}
                 />
               ))}
             </div>
@@ -11643,12 +11933,14 @@ function PostQueueCard({
   item,
   campaign,
   updateQueueItem,
-  mediaPreviewUrl
+  mediaPreviewUrl,
+  instagramSandboxConfigured
 }: {
   item: PostQueueItem;
   campaign?: Campaign;
   updateQueueItem: (id: string, updates: Partial<PostQueueItem>) => void;
   mediaPreviewUrl: string;
+  instagramSandboxConfigured: boolean;
 }) {
   const [showPreview, setShowPreview] = useState(false);
   const [copyState, setCopyState] = useState<"idle" | "copied" | "failed">("idle");
@@ -11850,6 +12142,11 @@ function PostQueueCard({
           <Button size="sm" variant="secondary" onClick={openPlatform}>
             <ExternalLink size={14} /> Open {item.platform}
           </Button>
+          {item.platform === "Instagram" && instagramSandboxConfigured && (
+            <Button size="sm" variant="secondary" disabled title="Dry-run scaffolding is ready; real publishing is disabled.">
+              Publish with Instagram sandbox - coming soon
+            </Button>
+          )}
         </div>
       </div>
 
