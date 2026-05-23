@@ -87,6 +87,15 @@ export type SimpleStyleChip =
   | "More polished"
   | "More concise";
 
+export type BrandSafetyStatus = "Safe" | "Needs review" | "Risky";
+
+export type BrandSafetyCheck = {
+  status: BrandSafetyStatus;
+  notes: string[];
+  checkedAt: string;
+  source: "AI" | "Fallback";
+};
+
 export type MediaAnalysis = {
   description?: string;
   angles?: string[];
@@ -143,6 +152,7 @@ export type GeneratedPost = {
   firstComment?: string;
   carouselIdeas?: string[];
   shotList?: string[];
+  safetyCheck?: BrandSafetyCheck;
   profileId?: string;
   profileName?: string;
   profileType?: ProfileType;
@@ -206,6 +216,7 @@ export type ApprovedPostMemory = {
     firstComment?: string;
     carouselIdeas?: string[];
     shotList?: string[];
+    safetyCheck?: BrandSafetyCheck;
   };
   contentAngle?: ContentAngle;
   intent?: string;
@@ -263,6 +274,7 @@ export type PostQueueItem = {
   firstComment?: string;
   carouselIdeas?: string[];
   shotList?: string[];
+  safetyCheck?: BrandSafetyCheck;
   status: QueueStatus;
   plannedAt?: string;
   createdAt: string;

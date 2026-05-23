@@ -40,6 +40,7 @@ import {
 } from "@/lib/mock-data";
 import type {
   ApprovedPostMemory,
+  BrandSafetyCheck,
   BrandVoiceProfile,
   Campaign,
   CampaignMediaContext,
@@ -109,7 +110,8 @@ type Screen =
   | "Content Library"
   | "Ready to Post"
   | "Review Drafts"
-  | "Analytics";
+  | "Analytics"
+  | "Connections";
 
 const navSections: Array<{
   title: string;
@@ -139,6 +141,12 @@ const navSections: Array<{
       { label: "Profiles", icon: Users },
       { label: "Company Knowledge", icon: FileText },
       { label: "Brand Voice Rules", icon: Sparkles }
+    ]
+  },
+  {
+    title: "Settings / Integrations",
+    items: [
+      { label: "Connections", icon: Send }
     ]
   }
 ];
@@ -781,6 +789,8 @@ function readFileAsDataUrl(file: File) {
     reader.readAsDataURL(file);
   });
 }
+
+const maxAiImageUploadBytes = 2_500_000;
 
 function createMockMediaAnalysis(media?: CampaignMediaContext) {
   if (!media?.filename && !media?.notes) {
@@ -1558,7 +1568,7 @@ function postsFromAiResponse(
     const variants = Array.isArray(data?.[platform]) ? data[platform] ?? [] : [];
     return variants.slice(0, 3).map((variant, index) => {
       const postPackage = postPackageFromVariant(platform, variant, formatAiVariant(platform, variant, index));
-      return {
+      const post = {
         id: `post-${Date.now()}-${platform}-${index}`,
         platform,
         status: "draft" as PostStatus,
@@ -1572,6 +1582,10 @@ function postsFromAiResponse(
         profileRole: selectedProfile?.role,
         sourceLibraryIds: librarySources.map((source) => source.id),
         sourceLibraryNames: librarySources.map(getLibrarySourceDisplayName)
+      };
+      return {
+        ...post,
+        safetyCheck: runFallbackBrandSafetyCheck(post.postCopy ?? post.content, undefined, post)
       };
     });
   });
@@ -1590,6 +1604,31 @@ function withTimeout<T>(promise: Promise<T>, timeoutMs: number, message: string)
         reject(error);
       });
   });
+}
+
+function imageDataUrlForGeneration(mediaContext: CampaignMediaContext | undefined, imageDataUrl: string) {
+  // Image vision is handled by /api/analyze-media when the file is uploaded.
+  // Keep /api/generate lightweight so larger photos cannot trigger a 413 response.
+  void mediaContext;
+  void imageDataUrl;
+  return undefined;
+}
+
+async function readJsonResponse(response: Response, fallbackMessage: string) {
+  const text = await response.text();
+  if (!text.trim()) {
+    return {};
+  }
+
+  try {
+    return JSON.parse(text);
+  } catch {
+    if (response.status === 413 || /request entity too large|payload too large/i.test(text)) {
+      throw new Error("The uploaded image is too large to send for AI generation. Use mock fallback, add media notes, or upload a smaller image.");
+    }
+
+    throw new Error(`${fallbackMessage}: ${text.slice(0, 120)}`);
+  }
 }
 
 export function SocialCommandCenter() {
@@ -1836,7 +1875,7 @@ export function SocialCommandCenter() {
 
   useEffect(() => {
     fetch("/api/status")
-      .then((response) => response.json())
+      .then((response) => readJsonResponse(response, "Status check failed"))
       .then((payload) => {
         setSupabaseStatus({
           missingClient: payload?.supabase?.missingClient ?? [],
@@ -1980,6 +2019,20 @@ export function SocialCommandCenter() {
     }));
 
     if (mediaType === "image") {
+      if (file.size > maxAiImageUploadBytes) {
+        setMediaImageDataUrl("");
+        setMediaContext((current) => ({
+          ...current,
+          analysis: createMockMediaAnalysis({
+            ...current,
+            type: mediaType,
+            filename: file.name
+          })
+        }));
+        setGenerationNotice("Large image uploaded. Using the preview plus your media notes instead of sending the image to AI.");
+        return;
+      }
+
       try {
         setMediaImageDataUrl(await readFileAsDataUrl(file));
       } catch {
@@ -2141,11 +2194,18 @@ export function SocialCommandCenter() {
   }
 
   function saveCampaign(newCampaign: Campaign) {
-    setCampaigns((current) => [newCampaign, ...current]);
-    setActiveCampaignId(newCampaign.id);
+    const campaignWithSafety: Campaign = {
+      ...newCampaign,
+      posts: newCampaign.posts.map((post) => ({
+        ...post,
+        safetyCheck: post.safetyCheck ?? runFallbackBrandSafetyCheck(userFacingPostContent(post.content, newCampaign, post), newCampaign, post)
+      }))
+    };
+    setCampaigns((current) => [campaignWithSafety, ...current]);
+    setActiveCampaignId(campaignWithSafety.id);
     setScreen("Review Drafts");
     if (storageMode === "supabase") {
-      saveCampaignToSupabase(newCampaign, mediaFile).catch((error) => {
+      saveCampaignToSupabase(campaignWithSafety, mediaFile).catch((error) => {
         setQueueDebugMessage(
           error instanceof Error
             ? `Campaign save failed: ${error.message}`
@@ -2324,7 +2384,7 @@ export function SocialCommandCenter() {
           }
         })
       });
-      const payload = await response.json();
+      const payload = await readJsonResponse(response, "OpenAI repurpose generation failed");
       if (payload?.fallbackReason === "missing_api_key") {
         saveCampaign(createMockRepurposeCampaign());
         setGenerationNotice("OPENAI_API_KEY is missing, so mock repurpose generation was used.");
@@ -2419,6 +2479,10 @@ export function SocialCommandCenter() {
       const effectiveRawIdea = idea.trim() || intent.trim();
       const effectiveCampaignTitle =
         campaignName.trim() || intent.trim().slice(0, 64) || "Untitled Campaign";
+      const generationImageDataUrl = imageDataUrlForGeneration(mediaContext, mediaImageDataUrl);
+      if (mediaContext.type === "image" && mediaImageDataUrl && !generationImageDataUrl) {
+        setGenerationNotice("Using your media notes and saved image analysis for generation.");
+      }
       const response = await fetch("/api/generate", {
         method: "POST",
         headers: {
@@ -2446,13 +2510,12 @@ export function SocialCommandCenter() {
             mediaContext.filename || mediaContext.notes
               ? {
                   ...mediaContext,
-                  imageDataUrl:
-                    mediaContext.type === "image" ? mediaImageDataUrl : undefined
+                  imageDataUrl: generationImageDataUrl
                 }
               : undefined
         })
       });
-      const payload = await response.json();
+      const payload = await readJsonResponse(response, "OpenAI generation failed");
 
       if (payload?.fallbackReason === "missing_api_key") {
         saveCampaign(createMockCampaign());
@@ -2897,7 +2960,11 @@ export function SocialCommandCenter() {
       lastQueueItemId: ""
     });
 
-    const updatedPost: GeneratedPost = { ...post, status: "approved" };
+    const updatedPost: GeneratedPost = {
+      ...post,
+      status: "approved",
+      safetyCheck: post.safetyCheck ?? runFallbackBrandSafetyCheck(userFacingPostContent(post.content, campaign, post), campaign, post)
+    };
     const variantNumber =
       campaign.posts
         .slice(0, campaign.posts.findIndex((item) => item.id === post.id) + 1)
@@ -3225,6 +3292,7 @@ export function SocialCommandCenter() {
     const selectedLibrarySources = librarySources.filter((source) =>
       (activeCampaign.sourceLibraryIds ?? []).includes(source.id)
     );
+    const generationImageDataUrl = imageDataUrlForGeneration(activeCampaign.mediaContext, mediaImageDataUrl);
 
     try {
       const response = await fetch("/api/generate", {
@@ -3249,10 +3317,7 @@ export function SocialCommandCenter() {
             activeCampaign.mediaContext
               ? {
                   ...activeCampaign.mediaContext,
-                  imageDataUrl:
-                    activeCampaign.mediaContext.type === "image"
-                      ? mediaImageDataUrl
-                      : undefined
+                  imageDataUrl: generationImageDataUrl
                 }
               : undefined,
           regeneration: {
@@ -3262,14 +3327,17 @@ export function SocialCommandCenter() {
           }
         })
       });
-      const payload = await response.json();
+      const payload = await readJsonResponse(response, "OpenAI regeneration failed");
 
       if (payload?.fallbackReason === "missing_api_key") {
+        const mockPackage = createMockRegeneratedPost(post, instruction);
+        const mockPost = { ...post, ...mockPackage, generatedBy: "Mock" as const };
         updatePost(post.id, {
           previousContent: post.content,
           previousPostCopy: userFacingPostContent(post.content, activeCampaign, post),
-          ...createMockRegeneratedPost(post, instruction),
-          generatedBy: "Mock"
+          ...mockPackage,
+          generatedBy: "Mock",
+          safetyCheck: runFallbackBrandSafetyCheck(mockPackage.postCopy ?? mockPackage.content, activeCampaign, mockPost)
         });
         return;
       }
@@ -3287,18 +3355,23 @@ export function SocialCommandCenter() {
         throw new Error("OpenAI returned no regenerated post.");
       }
 
+      const nextPost = { ...post, ...nextPackage, generatedBy: "AI" as const };
       updatePost(post.id, {
         previousContent: post.content,
         previousPostCopy: userFacingPostContent(post.content, activeCampaign, post),
         ...nextPackage,
-        generatedBy: "AI"
+        generatedBy: "AI",
+        safetyCheck: runFallbackBrandSafetyCheck(nextPackage.postCopy ?? nextPackage.content, activeCampaign, nextPost)
       });
     } catch {
+      const mockPackage = createMockRegeneratedPost(post, instruction);
+      const mockPost = { ...post, ...mockPackage, generatedBy: "Mock" as const };
       updatePost(post.id, {
         previousContent: post.content,
         previousPostCopy: userFacingPostContent(post.content, activeCampaign, post),
-        ...createMockRegeneratedPost(post, instruction),
-        generatedBy: "Mock"
+        ...mockPackage,
+        generatedBy: "Mock",
+        safetyCheck: runFallbackBrandSafetyCheck(mockPackage.postCopy ?? mockPackage.content, activeCampaign, mockPost)
       });
     } finally {
       setRegeneratingPostId("");
@@ -3584,6 +3657,9 @@ export function SocialCommandCenter() {
           )}
           {screen === "Analytics" && (
             <Analytics postQueue={postQueue} setScreen={setScreen} />
+          )}
+          {screen === "Connections" && (
+            <Connections />
           )}
           {screen === "Content Library" && (
             <ContentLibrary
@@ -4325,6 +4401,185 @@ function Analytics({
         </div>
       </Card>
     </div>
+  );
+}
+
+const connectionCards = [
+  {
+    name: "LinkedIn",
+    status: "Coming soon",
+    today: "Draft, preview, approve, copy, publish manually, then paste the live URL.",
+    later: "Schedule/publish approved posts and pull post metrics once LinkedIn API access is approved.",
+    notes: "LinkedIn publishing and post syncing require approved LinkedIn API access."
+  },
+  {
+    name: "X / Twitter",
+    status: "Coming soon",
+    today: "Create short posts and threads, copy manually, and track metrics by hand.",
+    later: "Connect an X app for posting, metrics sync, and account learning.",
+    notes: "Needs X API credentials, permissions, and rate-limit review."
+  },
+  {
+    name: "Instagram",
+    status: "Ready for sandbox manual test",
+    today: "Generate captions, overlay ideas, and media-aware previews for manual posting.",
+    later: "Test scheduling/publishing through the Meta/Instagram Graph API.",
+    notes: "Use the test Instagram account manually first. Do not connect real accounts until auth, permissions, and posting workflow are confirmed."
+  },
+  {
+    name: "TikTok",
+    status: "Planned",
+    today: "Generate hooks, scripts, shot lists, captions, and manual posting copy.",
+    later: "Explore TikTok posting and analytics APIs after the manual workflow is proven.",
+    notes: "Video/audio analysis and account publishing are not connected yet."
+  },
+  {
+    name: "Website / Blog",
+    status: "Website fetching active",
+    today: "Fetch public webpages into Company Knowledge and use them as source material.",
+    later: "Add recurring refreshes and deeper website/blog indexing.",
+    notes: "Public website fetching is active. Social URLs still require platform APIs."
+  },
+  {
+    name: "Analytics Sync",
+    status: "Manual metrics active",
+    today: "Paste live URLs and manually enter impressions, likes, comments, shares, saves, and clicks.",
+    later: "Pull metrics automatically from connected accounts.",
+    notes: "Manual metrics power the Analytics page today."
+  },
+  {
+    name: "Mentions / Replies",
+    status: "Planned",
+    today: "No inbox, mention monitoring, or reply drafting yet.",
+    later: "Monitor comments, mentions, and replies and suggest response drafts.",
+    notes: "Requires account connections, approval controls, and response safety checks."
+  },
+  {
+    name: "Trend Listening",
+    status: "Planned",
+    today: "No automated trend monitoring yet.",
+    later: "Track relevant industry conversations and suggest post angles.",
+    notes: "Should come after permissions, account scopes, and data policy are finalized."
+  }
+];
+
+function connectionStatusClass(status: string) {
+  if (status.includes("active") || status.includes("Manual metrics")) return "bg-teal-100 text-primary";
+  if (status.includes("sandbox")) return "bg-blue-100 text-blue-800";
+  if (status.includes("soon")) return "bg-amber-100 text-amber-800";
+  return "bg-slate-100 text-slate-600";
+}
+
+function Connections() {
+  const currentWorkflow = [
+    "Generate post",
+    "Approve to Ready to Post",
+    "Copy post manually",
+    "Publish manually",
+    "Paste live URL",
+    "Enter metrics manually",
+    "Review analytics"
+  ];
+  const futureWorkflow = [
+    "Connect account",
+    "Schedule/publish from dashboard",
+    "Pull metrics automatically",
+    "Monitor mentions/replies",
+    "Suggest responses",
+    "Learn from performance"
+  ];
+  const securityChecklist = [
+    "Auth enabled",
+    "Workspace permissions enabled",
+    "Sensitive data policy reviewed",
+    "Approval workflow confirmed",
+    "Manual posting tested",
+    "Account permissions reviewed"
+  ];
+
+  return (
+    <div className="space-y-5">
+      <Card className="p-6">
+        <div className="flex flex-col justify-between gap-4 lg:flex-row lg:items-start">
+          <div>
+            <p className="text-xs font-extrabold uppercase tracking-[0.16em] text-primary">Connections roadmap</p>
+            <h3 className="mt-2 text-2xl font-extrabold tracking-tight">Manual today, connected later</h3>
+            <p className="mt-2 max-w-3xl text-sm leading-6 text-muted-foreground">
+              Today, posts are copied and published manually. Metrics can be entered manually. Account connections will come later once the workflow is stable.
+            </p>
+          </div>
+          <Pill>No accounts connected yet</Pill>
+        </div>
+      </Card>
+
+      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+        {connectionCards.map((card) => (
+          <Card key={card.name} className="p-5">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <h3 className="font-extrabold tracking-tight">{card.name}</h3>
+                <span className={cn("mt-2 inline-flex rounded-md px-2.5 py-1 text-xs font-bold", connectionStatusClass(card.status))}>
+                  {card.status}
+                </span>
+              </div>
+            </div>
+            <div className="mt-4 space-y-3 text-sm leading-6">
+              <div>
+                <p className="text-xs font-extrabold uppercase tracking-wide text-muted-foreground">Works today</p>
+                <p className="mt-1 text-muted-foreground">{card.today}</p>
+              </div>
+              <div>
+                <p className="text-xs font-extrabold uppercase tracking-wide text-muted-foreground">Later</p>
+                <p className="mt-1 text-muted-foreground">{card.later}</p>
+              </div>
+              <div className="rounded-md bg-slate-50 p-3 text-muted-foreground">
+                {card.notes}
+              </div>
+            </div>
+          </Card>
+        ))}
+      </div>
+
+      <div className="grid gap-5 lg:grid-cols-2">
+        <WorkflowCard title="Current workflow" items={currentWorkflow} />
+        <WorkflowCard title="Future connected workflow" items={futureWorkflow} />
+      </div>
+
+      <Card className="p-5">
+        <h3 className="text-lg font-bold">Security checklist before connecting accounts</h3>
+        <p className="mt-1 text-sm leading-6 text-muted-foreground">
+          Account connections should wait until these basics are confirmed.
+        </p>
+        <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+          {securityChecklist.map((item) => (
+            <div key={item} className="flex gap-3 rounded-lg border border-slate-200 bg-white p-3 text-sm shadow-sm">
+              <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-teal-100 text-xs font-extrabold text-primary">
+                ✓
+              </span>
+              <span className="font-semibold">{item}</span>
+            </div>
+          ))}
+        </div>
+      </Card>
+    </div>
+  );
+}
+
+function WorkflowCard({ title, items }: { title: string; items: string[] }) {
+  return (
+    <Card className="p-5">
+      <h3 className="text-lg font-bold">{title}</h3>
+      <div className="mt-4 grid gap-3">
+        {items.map((item, index) => (
+          <div key={item} className="flex items-center gap-3 rounded-lg border border-slate-200 bg-white p-3 shadow-sm">
+            <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-slate-100 text-xs font-extrabold text-slate-600">
+              {index + 1}
+            </span>
+            <span className="text-sm font-semibold">{item}</span>
+          </div>
+        ))}
+      </div>
+    </Card>
   );
 }
 
@@ -5834,7 +6089,7 @@ function KnowledgeBase({
         method: "POST",
         body: formData
       });
-      const payload = await response.json();
+      const payload = await readJsonResponse(response, "Document extraction failed");
       if (!response.ok) {
         throw new Error(payload?.error ?? "Could not extract text from this document.");
       }
@@ -6768,7 +7023,7 @@ function KnowledgeSourceDetailsPanel({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ url: websiteUrl })
       });
-      const payload = await response.json();
+      const payload = await readJsonResponse(response, "Website fetch failed");
       if (!response.ok) throw new Error(payload?.error ?? "Could not fetch website content.");
 
       const fetchedAt = payload.fetched_at
@@ -6800,7 +7055,7 @@ function KnowledgeSourceDetailsPanel({
       const formData = new FormData();
       formData.append("file", file);
       const response = await fetch("/api/extract-document", { method: "POST", body: formData });
-      const payload = await response.json();
+      const payload = await readJsonResponse(response, "Document extraction failed");
       if (!response.ok) throw new Error(payload?.error ?? "Could not extract text from this document.");
 
       let storageData: { storagePath?: string; publicUrl?: string } | null = null;
@@ -7112,36 +7367,46 @@ function MediaLibrary({
     try {
       let analysis: Partial<MediaAsset> = {};
       if (mediaType === "image") {
-        const imageDataUrl = await readFileAsDataUrl(file);
-        const response = await fetch("/api/analyze-media", {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json"
-          },
-          body: JSON.stringify({
-            imageDataUrl,
-            filename: file.name,
-            notes
-          })
-        });
-        const payload = await response.json();
-        if (response.ok && payload?.ok && payload.data) {
+        if (file.size > maxAiImageUploadBytes) {
+          setMessage("Large image saved without AI image analysis. Add notes to guide generation.");
           analysis = {
-            description: payload.data.description,
-            suggestedAngles: payload.data.suggestedAngles ?? [],
-            overlayText: payload.data.overlayText,
-            sensitivityWarnings: payload.data.sensitivityWarnings ?? [],
-            altText: payload.data.altText,
-            tags: tagList.length > 0 ? tagList : payload.data.tags ?? []
-          };
-        } else {
-          setMessage(payload?.error ?? "Saved without AI image analysis.");
-          analysis = {
-            description: "Image saved. AI analysis was not available.",
-            suggestedAngles: [],
+            description: notes || "Image saved. AI analysis was skipped because the file is large.",
+            suggestedAngles: notes ? [notes] : [],
             sensitivityWarnings: [],
             tags: tagList
           };
+        } else {
+          const imageDataUrl = await readFileAsDataUrl(file);
+          const response = await fetch("/api/analyze-media", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json"
+            },
+            body: JSON.stringify({
+              imageDataUrl,
+              filename: file.name,
+              notes
+            })
+          });
+          const payload = await readJsonResponse(response, "Image analysis failed");
+          if (response.ok && payload?.ok && payload.data) {
+            analysis = {
+              description: payload.data.description,
+              suggestedAngles: payload.data.suggestedAngles ?? [],
+              overlayText: payload.data.overlayText,
+              sensitivityWarnings: payload.data.sensitivityWarnings ?? [],
+              altText: payload.data.altText,
+              tags: tagList.length > 0 ? tagList : payload.data.tags ?? []
+            };
+          } else {
+            setMessage(payload?.error ?? "Saved without AI image analysis.");
+            analysis = {
+              description: "Image saved. AI analysis was not available.",
+              suggestedAngles: [],
+              sensitivityWarnings: [],
+              tags: tagList
+            };
+          }
         }
       } else {
         analysis = {
@@ -7621,6 +7886,18 @@ function formatShortDate(value?: string) {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return value;
   return date.toLocaleDateString();
+}
+
+function formatShortDateTime(value?: string) {
+  if (!value) return "Unknown time";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return date.toLocaleString([], {
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit"
+  });
 }
 
 const emptyVoiceSourceForm = {
@@ -9651,7 +9928,8 @@ function supportingFieldsFromPost(post: GeneratedPost) {
     hashtags: post.hashtags ?? [],
     firstComment: post.firstComment,
     carouselIdeas: post.carouselIdeas ?? [],
-    shotList: post.shotList ?? []
+    shotList: post.shotList ?? [],
+    safetyCheck: post.safetyCheck
   };
 }
 
@@ -9670,8 +9948,156 @@ const improveActions = [
   { label: "Improve media fit", instruction: "Connect the post more clearly to the uploaded media or media notes." }
 ];
 
+const brandSafetyQuickActions = [
+  { label: "Make safer", instruction: "Make this safer by removing unsupported claims, confidential details, and sensitive operational specifics." },
+  { label: "Remove unsupported claim", instruction: "Remove unsupported claims and keep only what is grounded in the campaign brief or Company Knowledge." },
+  { label: "Make less hypey", instruction: "Make this less hypey, more precise, and less promotional." },
+  { label: "Make more specific", instruction: "Make this more specific using only the current campaign brief, media notes, and Company Knowledge." }
+];
+
+const unsupportedClaimPatterns = [
+  /\bguarantee(?:d|s)?\b/i,
+  /\bproven\b/i,
+  /\bonly\b/i,
+  /\bbest\b/i,
+  /\bworld[- ]?class\b/i,
+  /\bindustry[- ]?leading\b/i,
+  /\bfirst\b/i,
+  /\bnever\b/i,
+  /\balways\b/i,
+  /\b\d+%|\b\d+x\b/i,
+  /\b(days?|hours?|weeks?)\b/i
+];
+
+const genericAiPatterns = [
+  /\bin today's (?:fast-paced|ever-changing|rapidly evolving)\b/i,
+  /\bunlocks? (?:the )?power\b/i,
+  /\bgame[- ]changing\b/i,
+  /\brevolutionary\b/i,
+  /\bseamless(?:ly)?\b/i,
+  /\btransform(?:ing|s)? the way\b/i,
+  /\btake (?:it|things|your \w+) to the next level\b/i,
+  /\bwhere .* meets .*\b/i
+];
+
+const overhypedPatterns = [
+  /\bmassive\b/i,
+  /\bdominates?\b/i,
+  /\bcrush(?:es|ing)?\b/i,
+  /\bdisrupt(?:s|ing|ive)\b/i,
+  /\bunstoppable\b/i,
+  /\bthe future of\b/i
+];
+
+const sensitivePatterns = [
+  /\bconfidential\b/i,
+  /\bsecret\b/i,
+  /\bNDA\b/i,
+  /\bcustomer name\b/i,
+  /\bclient name\b/i,
+  /\bproprietary\b/i,
+  /\bfloor plan\b/i,
+  /\badministrator password\b/i,
+  /\bcredential\b/i,
+  /\baccess badge\b/i
+];
+
+function runFallbackBrandSafetyCheck(
+  copy: string,
+  campaign?: Campaign,
+  post?: GeneratedPost
+): BrandSafetyCheck {
+  const notes = new Set<string>();
+  const normalizedCopy = copy.trim();
+  const knowledgeText = [
+    ...(campaign?.sourceLibraryNames ?? []),
+    ...(post?.sourceLibraryNames ?? [])
+  ].join(" ");
+  const hasCompanyKnowledge = knowledgeText.trim().length > 0;
+
+  if (!normalizedCopy) {
+    notes.add("Post copy is empty");
+  }
+
+  if (unsupportedClaimPatterns.some((pattern) => pattern.test(normalizedCopy)) && !hasCompanyKnowledge) {
+    notes.add("Claim needs source");
+  }
+
+  if (genericAiPatterns.some((pattern) => pattern.test(normalizedCopy))) {
+    notes.add("Tone sounds generic");
+  }
+
+  if (overhypedPatterns.some((pattern) => pattern.test(normalizedCopy))) {
+    notes.add("Language may be overhyped");
+  }
+
+  if (sensitivePatterns.some((pattern) => pattern.test(normalizedCopy))) {
+    notes.add("Customer detail may need approval");
+  }
+
+  if (campaign?.mediaContext?.filename || post?.mediaUsed) {
+    const mediaWarnings = campaign?.mediaContext?.analysis?.warnings ?? [];
+    if (mediaWarnings.length > 0 || /whiteboard|factory floor|workspace|badge|screen|notes|diagram/i.test(campaign?.mediaContext?.analysis?.description ?? campaign?.mediaContext?.notes ?? "")) {
+      notes.add("Media may show sensitive workspace details");
+    }
+  }
+
+  if (post?.platform === "X" && normalizedCopy.length > 280) {
+    notes.add("Platform length issue");
+  }
+
+  if (post?.platform === "LinkedIn" && normalizedCopy.split(/\s+/).filter(Boolean).length > 320) {
+    notes.add("Platform length issue");
+  }
+
+  const noteList = Array.from(notes);
+  const riskyNotes = ["Post copy is empty", "Customer detail may need approval"];
+  const status = noteList.some((note) => riskyNotes.includes(note))
+    ? "Risky"
+    : notes.size > 0
+      ? "Needs review"
+      : "Safe";
+
+  return {
+    status,
+    notes: noteList.length > 0 ? noteList : ["No obvious claim, privacy, or tone risks found."],
+    checkedAt: new Date().toISOString(),
+    source: "Fallback"
+  };
+}
+
+function safetyCheckForPost(post: GeneratedPost, campaign?: Campaign) {
+  return post.safetyCheck ?? runFallbackBrandSafetyCheck(userFacingPostContent(post.content, campaign, post), campaign, post);
+}
+
+function safetyStatusClass(status: BrandSafetyCheck["status"]) {
+  if (status === "Safe") return "bg-teal-100 text-primary";
+  if (status === "Needs review") return "bg-amber-100 text-amber-800";
+  return "bg-red-100 text-red-700";
+}
+
+function applyBrandSafetyQuickFix(copy: string, instruction: string) {
+  let nextCopy = copy
+    .replace(/\b(game[- ]changing|revolutionary|industry[- ]leading|world[- ]class|massive|unstoppable)\b/gi, "meaningful")
+    .replace(/\bguaranteed?\b/gi, "intended")
+    .replace(/\balways\b/gi, "often")
+    .replace(/\bnever\b/gi, "rarely")
+    .replace(/\bthe only\b/gi, "one");
+
+  if (/unsupported claim/i.test(instruction)) {
+    nextCopy = nextCopy.replace(/\b\d+%|\b\d+x\b/gi, "").replace(/\bproven\b/gi, "useful");
+  }
+
+  if (/more specific/i.test(instruction) && !/Conduit/i.test(nextCopy)) {
+    nextCopy = `Conduit: ${nextCopy}`;
+  }
+
+  return nextCopy.replace(/[ \t]{2,}/g, " ").replace(/\n{3,}/g, "\n\n").trim();
+}
+
 function postReadiness(post: GeneratedPost, campaign?: Campaign) {
   const copy = userFacingPostContent(post.content, campaign, post);
+  const safety = safetyCheckForPost(post, campaign);
   const wordCount = copy.split(/\s+/).filter(Boolean).length;
   const firstLine = copy.split("\n").find(Boolean) ?? "";
   const hasMedia = Boolean(post.mediaUsed || campaign?.mediaContext?.filename || campaign?.mediaContext?.notes);
@@ -9743,7 +10169,7 @@ function postReadiness(post: GeneratedPost, campaign?: Campaign) {
     },
     {
       label: "Risk/safety check",
-      passed: !/\b(guaranteed|guarantee|best|only|always|never|confidential|secret)\b/i.test(copy),
+      passed: safety.status === "Safe",
       suggestion: "Check unsupported claims or sensitive details."
     }
   ];
@@ -10443,6 +10869,124 @@ function PostQueue({
   );
 }
 
+function BrandSafetyPanel({
+  post,
+  campaign,
+  onAction,
+  onUpdateCheck
+}: {
+  post: GeneratedPost;
+  campaign?: Campaign;
+  onAction?: (instruction: string) => void;
+  onUpdateCheck?: (check: BrandSafetyCheck) => void;
+}) {
+  const fallbackCheck = useMemo(
+    () => safetyCheckForPost(post, campaign),
+    [campaign, post]
+  );
+  const [check, setCheck] = useState<BrandSafetyCheck>(fallbackCheck);
+  const [isChecking, setIsChecking] = useState(false);
+  const [hasRequestedAi, setHasRequestedAi] = useState(false);
+
+  useEffect(() => {
+    setCheck(fallbackCheck);
+  }, [fallbackCheck]);
+
+  useEffect(() => {
+    if (hasRequestedAi || fallbackCheck.source === "AI") return;
+
+    let cancelled = false;
+    setHasRequestedAi(true);
+    setIsChecking(true);
+    fetch("/api/brand-safety", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        postCopy: userFacingPostContent(post.content, campaign, post),
+        platform: post.platform,
+        campaign: campaign
+          ? {
+              name: campaign.name,
+              intent: campaign.intent,
+              contentAngle: campaign.contentAngle,
+              details: campaign.idea,
+              mediaNotes: campaign.mediaContext?.notes,
+              mediaAnalysis: campaign.mediaContext?.analysis,
+              knowledgeSources: campaign.sourceLibraryNames ?? post.sourceLibraryNames ?? []
+            }
+          : null
+      })
+    })
+      .then((response) => readJsonResponse(response, "Brand safety check failed"))
+      .then((payload) => {
+        if (cancelled || !payload?.check) return;
+        const nextCheck = payload.check as BrandSafetyCheck;
+        setCheck(nextCheck);
+        onUpdateCheck?.(nextCheck);
+      })
+      .catch((error) => {
+        console.info("[SCC] Brand safety AI check unavailable; using fallback.", error);
+      })
+      .finally(() => {
+        if (!cancelled) setIsChecking(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [campaign, fallbackCheck.source, hasRequestedAi, onUpdateCheck, post]);
+
+  return (
+    <div className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
+      <div className="flex flex-col justify-between gap-2 sm:flex-row sm:items-start">
+        <div>
+          <p className="text-xs font-extrabold uppercase tracking-wide text-muted-foreground">Brand Safety / Claim Check</p>
+          <p className="mt-1 text-sm leading-6 text-muted-foreground">
+            Checks claims, sensitive details, hype, generic language, and platform fit before publishing.
+          </p>
+        </div>
+        <span className={cn("rounded-md px-3 py-1 text-sm font-bold shadow-sm", safetyStatusClass(check.status))}>
+          {isChecking ? "Checking..." : check.status}
+        </span>
+      </div>
+      <div className="mt-3 grid gap-2">
+        {check.notes.map((note) => (
+          <div key={note} className="flex gap-2 rounded-md bg-slate-50 p-2 text-sm">
+            <span className={cn(
+              "mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-[10px] font-bold",
+              check.status === "Safe" ? "bg-teal-100 text-primary" : check.status === "Needs review" ? "bg-amber-100 text-amber-800" : "bg-red-100 text-red-700"
+            )}>
+              {check.status === "Safe" ? "OK" : "!"}
+            </span>
+            <span>{note}</span>
+          </div>
+        ))}
+      </div>
+      <p className="mt-3 text-xs text-muted-foreground">
+        Source: {check.source === "AI" ? "AI assisted" : "deterministic fallback"} · Last checked {formatShortDateTime(check.checkedAt)}
+      </p>
+      {onAction && (
+        <div className="mt-4">
+          <p className="text-xs font-bold uppercase text-muted-foreground">Quick actions</p>
+          <div className="mt-2 flex flex-wrap gap-2">
+            {brandSafetyQuickActions.map((action) => (
+              <Button
+                key={action.label}
+                type="button"
+                size="sm"
+                variant="secondary"
+                onClick={() => onAction(action.instruction)}
+              >
+                {action.label}
+              </Button>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function QueueFilter({
   label,
   children
@@ -10544,6 +11088,7 @@ function PostQueueCard({
     firstComment: item.firstComment,
     carouselIdeas: item.carouselIdeas,
     shotList: item.shotList,
+    safetyCheck: item.safetyCheck,
     profileId: item.profileId,
     profileName: item.profileName
   };
@@ -10641,6 +11186,27 @@ function PostQueueCard({
 
       <div className="mt-4">
         <PostReadinessPanel post={previewPost} campaign={previewCampaign} />
+      </div>
+
+      <div className="mt-4">
+        <BrandSafetyPanel
+          post={previewPost}
+          campaign={previewCampaign}
+          onUpdateCheck={(safetyCheck) => updateQueueItem(item.id, { safetyCheck })}
+          onAction={(instruction) => {
+            const saferCopy = applyBrandSafetyQuickFix(displayContent, instruction);
+            const saferPost = {
+              ...previewPost,
+              content: saferCopy,
+              postCopy: saferCopy
+            };
+            updateQueueItem(item.id, {
+              content: saferCopy,
+              postCopy: saferCopy,
+              safetyCheck: runFallbackBrandSafetyCheck(saferCopy, previewCampaign, saferPost)
+            });
+          }}
+        />
       </div>
 
       {details.length > 0 && (
@@ -11283,7 +11849,15 @@ function PostEditor({
       {mode === "edit" ? (
         <textarea
           value={displayContent}
-          onChange={(event) => updatePost(post.id, { postCopy: event.target.value, content: event.target.value })}
+          onChange={(event) => {
+            const nextCopy = event.target.value;
+            const nextPost = { ...post, postCopy: nextCopy, content: nextCopy };
+            updatePost(post.id, {
+              postCopy: nextCopy,
+              content: nextCopy,
+              safetyCheck: runFallbackBrandSafetyCheck(nextCopy, campaign, nextPost)
+            });
+          }}
           className="min-h-[240px] w-full rounded-lg border border-input bg-white p-5 text-base leading-7 shadow-inner outline-none focus:ring-2 focus:ring-ring"
         />
       ) : (
@@ -11298,6 +11872,17 @@ function PostEditor({
           post={post}
           campaign={campaign}
           onImprove={(instruction) => {
+            setRegenerateInstruction(instruction);
+            setShowRegenerate(true);
+          }}
+        />
+      </div>
+      <div className="mt-4">
+        <BrandSafetyPanel
+          post={post}
+          campaign={campaign}
+          onUpdateCheck={(safetyCheck) => updatePost(post.id, { safetyCheck })}
+          onAction={(instruction) => {
             setRegenerateInstruction(instruction);
             setShowRegenerate(true);
           }}

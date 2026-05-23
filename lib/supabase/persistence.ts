@@ -1,6 +1,7 @@
 import { getBrowserSupabaseClient, isSupabaseConfigured } from "@/lib/supabase/client";
 import type {
   ApprovedPostMemory,
+  BrandSafetyCheck,
   BrandVoiceProfile,
   Campaign,
   CampaignMediaContext,
@@ -93,6 +94,7 @@ type GeneratedPostRow = {
     profileRole?: string;
     sourceLibraryIds?: string[];
     sourceLibraryNames?: string[];
+    safetyCheck?: BrandSafetyCheck;
   } | null;
   status: "draft" | "approved" | "rejected";
   previous_versions_json: string[] | null;
@@ -552,7 +554,8 @@ export async function savePostQueueItemToSupabase(item: PostQueueItem) {
       livePostUrl: item.livePostUrl,
       postedAt: item.postedAt,
       publishNotes: item.publishNotes,
-      metrics: item.metrics ?? {}
+      metrics: item.metrics ?? {},
+      safetyCheck: item.safetyCheck
     },
     media_used: item.mediaUsed,
     status: item.status,
@@ -975,7 +978,8 @@ function generatedPostToRow(campaignId: string, post: GeneratedPost, index: numb
       profileType: post.profileType,
       profileRole: post.profileRole,
       sourceLibraryIds: post.sourceLibraryIds,
-      sourceLibraryNames: post.sourceLibraryNames
+      sourceLibraryNames: post.sourceLibraryNames,
+      safetyCheck: post.safetyCheck
     },
     status: post.status,
     previous_versions_json: post.previousContent ? [post.previousContent] : [],
@@ -1009,7 +1013,8 @@ function generatedPostFromRow(row: GeneratedPostRow): GeneratedPost {
     profileType: content.profileType as GeneratedPost["profileType"],
     profileRole: content.profileRole,
     sourceLibraryIds: content.sourceLibraryIds ?? [],
-    sourceLibraryNames: content.sourceLibraryNames ?? []
+    sourceLibraryNames: content.sourceLibraryNames ?? [],
+    safetyCheck: content.safetyCheck
   };
 }
 
@@ -1075,6 +1080,7 @@ function postQueueItemFromRow(row: any): PostQueueItem {
     postedAt: supporting.postedAt ?? undefined,
     publishNotes: supporting.publishNotes ?? undefined,
     metrics: supporting.metrics ?? {},
+    safetyCheck: supporting.safetyCheck ?? undefined,
     mediaUsed: Boolean(row.media_used),
     status: row.status ?? "Ready",
     plannedAt: row.planned_at ?? undefined,
