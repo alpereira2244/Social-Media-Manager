@@ -554,6 +554,7 @@ export async function savePostQueueItemToSupabase(item: PostQueueItem) {
       livePostUrl: item.livePostUrl,
       postedAt: item.postedAt,
       publishNotes: item.publishNotes,
+      isSandbox: item.isSandbox,
       metrics: item.metrics ?? {},
       safetyCheck: item.safetyCheck
     },
@@ -1079,6 +1080,7 @@ function postQueueItemFromRow(row: any): PostQueueItem {
     livePostUrl: supporting.livePostUrl ?? undefined,
     postedAt: supporting.postedAt ?? undefined,
     publishNotes: supporting.publishNotes ?? undefined,
+    isSandbox: Boolean(supporting.isSandbox),
     metrics: supporting.metrics ?? {},
     safetyCheck: supporting.safetyCheck ?? undefined,
     mediaUsed: Boolean(row.media_used),

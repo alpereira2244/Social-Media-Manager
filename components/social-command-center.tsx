@@ -5,6 +5,8 @@ import {
   Check,
   Clipboard,
   BookOpen,
+  Download,
+  ExternalLink,
   FileText,
   Heart,
   MessageCircle,
@@ -363,6 +365,54 @@ const campaignTemplateConfigs: Record<CampaignTemplate, CampaignTemplateConfig> 
 };
 const queueStatuses: QueueStatus[] = ["Ready", "Scheduled", "Posted", "Archived"];
 
+const platformUrls: Record<Platform, string> = {
+  Instagram: "https://www.instagram.com/",
+  LinkedIn: "https://www.linkedin.com/",
+  X: "https://x.com/",
+  TikTok: "https://www.tiktok.com/"
+};
+
+const manualPostingSteps: Record<Platform, string[]> = {
+  Instagram: [
+    "Download media",
+    "Copy caption",
+    "Open Instagram",
+    "Upload media",
+    "Paste caption",
+    "Publish",
+    "Paste live post URL",
+    "Add metrics"
+  ],
+  LinkedIn: [
+    "Copy post",
+    "Open LinkedIn",
+    "Create post",
+    "Add media if applicable",
+    "Publish",
+    "Paste live post URL",
+    "Add metrics"
+  ],
+  X: [
+    "Copy post",
+    "Open X",
+    "Create post/thread",
+    "Add media if applicable",
+    "Publish",
+    "Paste live post URL",
+    "Add metrics"
+  ],
+  TikTok: [
+    "Download video/media",
+    "Copy caption",
+    "Open TikTok",
+    "Upload video",
+    "Paste caption",
+    "Publish",
+    "Paste live post URL",
+    "Add metrics"
+  ]
+};
+
 type RepurposeSource = {
   type: "campaign" | "post";
   campaignId: string;
@@ -482,10 +532,10 @@ function createVoiceAnalysis(
       : "Vague claims, buzzwords, overexplaining, captions that sound templated",
     bestUseCases:
       source.type === "Recruiting"
-        ? "Hiring posts, team culture, candidate nurture, values-led campaigns"
+        ? "Hiring posts, team culture, candidate nurture, values-led briefs"
         : source.type === "Customer Story"
           ? "Case studies, proof points, transformation stories, sales enablement"
-          : `${source.name} works best for ${source.platform} campaigns, launches, POV posts, and message testing.`
+          : `${source.name} works best for ${source.platform} briefs, launches, POV posts, and message testing.`
   };
 }
 
@@ -612,7 +662,7 @@ function looksLikeGenericRawIdea(value?: string) {
     legacyGenericIdea.toLowerCase(),
     rawIdeaPlaceholder.toLowerCase(),
     "write a social post",
-    "create a campaign",
+    "create a brief",
     "make a post",
     "generate posts",
     "turn this into content",
@@ -811,7 +861,7 @@ function createMockMediaAnalysis(media?: CampaignMediaContext) {
     angles: [
       "Behind-the-scenes proof",
       "Operational lesson",
-      "Visual evidence for the campaign idea"
+      "Visual evidence for the brief idea"
     ],
     captionIdeas: [
       "Turn the media into a concrete proof point.",
@@ -940,7 +990,7 @@ function createLibrarySourceAnalysis(
       ? "Outcomes, proof, credibility, change over time"
       : isWebsite
         ? "Positioning, product value, workflow, customer pain points"
-        : "Campaign ideas, audience education, category POV, repeatable systems",
+        : "Content brief ideas, audience education, category POV, repeatable systems",
     repeatedPhrases:
       words > 40
         ? "workflow, clarity, useful signal, consistent voice, approved posts"
@@ -963,7 +1013,7 @@ function librarySourceBrief(sources: LibrarySource[]) {
       names: [] as string[],
       label: "No Company Knowledge items selected",
       angle: "general product context",
-      proof: "the campaign idea itself"
+      proof: "the brief idea itself"
     };
   }
 
@@ -1034,6 +1084,56 @@ function sourceFlavor(source?: VoiceSource) {
   return flavors[source.type];
 }
 
+const conduitBannedTerms = [
+  "revolutionize",
+  "transform the way",
+  "unlock",
+  "elevate",
+  "seamless",
+  "cutting-edge",
+  "game-changing",
+  "next-gen",
+  "supercharge",
+  "empower",
+  "future of work"
+];
+
+function sanitizeConduitCopy(copy: string) {
+  return copy
+    .replace(/\brevolutioniz(?:e|es|ing)\b/gi, "improve")
+    .replace(/\btransform(?:s|ing)? the way\b/gi, "change how")
+    .replace(/\bunlock(?:s|ing)?\b/gi, "make visible")
+    .replace(/\belevat(?:e|es|ing)\b/gi, "improve")
+    .replace(/\bseamless(?:ly)?\b/gi, "reliable")
+    .replace(/\bcutting[- ]edge\b/gi, "practical")
+    .replace(/\bgame[- ]changing\b/gi, "useful")
+    .replace(/\bnext[- ]gen\b/gi, "modern")
+    .replace(/\bsupercharge(?:s|d|ing)?\b/gi, "support")
+    .replace(/\bempower(?:s|ed|ing)?\b/gi, "help")
+    .replace(/\bthe future of work\b/gi, "real operational work")
+    .replace(/[ \t]{2,}/g, " ")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+
+function concreteMediaPhrase(mediaContext?: CampaignMediaContext) {
+  const mediaText = `${mediaContext?.notes ?? ""} ${mediaContext?.analysis?.description ?? ""}`.trim();
+  if (/robot/i.test(mediaText)) return "the robot in this setup";
+  if (/whiteboard|notes|diagram/i.test(mediaText)) return "the whiteboard notes behind the workflow";
+  if (/factory|floor|workcell|cell/i.test(mediaText)) return "the factory-floor context";
+  if (/hardware|machine|sensor|plc/i.test(mediaText)) return "the hardware and control-system context";
+  if (/workshop|office/i.test(mediaText)) return "the workshop where the work is getting shaped";
+  return mediaContext?.filename ? "the attached media" : "";
+}
+
+function platformHasUsefulHashtags(platform: Platform) {
+  return platform === "Instagram" || platform === "TikTok";
+}
+
+function capitalizeFirst(value: string) {
+  return value ? `${value.charAt(0).toUpperCase()}${value.slice(1)}` : value;
+}
+
 function createMockPosts(
   campaignName: string,
   intent: string,
@@ -1057,7 +1157,14 @@ function createMockPosts(
     : "Posting account: Conduit by default.";
   const libraryBrief = librarySourceBrief(librarySources);
   const mediaNote = mediaContext?.notes || mediaContext?.analysis?.description || "";
+  const mediaPhrase = concreteMediaPhrase(mediaContext);
   const proofLine = mediaNote || idea || intent;
+  const knowledgePhrase = librarySources.length > 0
+    ? libraryBrief.angle.toLowerCase()
+    : "the real operation";
+  const approvedCadence = approvedExamples[0]?.finalContent
+    ? "Cadence borrowed from approved examples without copying them."
+    : "No approved examples yet, so defaulted to concise Conduit voice.";
   const templateLine =
     campaignTemplate && campaignTemplate !== "Other / blank"
       ? ` The structure is guided by the ${campaignTemplate} template.`
@@ -1076,13 +1183,17 @@ function createMockPosts(
     profileType === "Company Account"
       ? `${profileName} is sharing this because`
       : `I keep coming back to this because`;
+  const linkedinCopy = concise
+    ? `${bold ? "The useful signal is specific:" : "Quick thought:"} ${intent}\n\n${mediaPhrase ? `${capitalizeFirst(mediaPhrase)} makes it concrete.` : proofLine}\n\nBuild closer to the real workflow. That is where the constraints show up first.`
+    : `${profileLead} ${bold ? "automation breaks when it is designed too far from the floor" : "the best automation work starts close to the real operation"}.\n\n${intent}\n\n${mediaPhrase ? `You can see it in ${mediaPhrase}: the useful details are in the handoffs, notes, hardware, and constraints around the work.` : `The useful signal here is ${proofLine}.`}${supportLine}\n\n${technical ? "The process detail matters because the system has to fit the machines, people, exceptions, and handoffs already in motion." : "The takeaway: stay close enough to the work to build around what actually happens, not what the slide says happens."}`;
+  const xCopy = `${bold ? "Useful signal:" : "The point:"} ${intent}\n\n${mediaPhrase ? `${capitalizeFirst(mediaPhrase)} is the reminder: ` : ""}${technical ? "workflow details matter more than the pitch." : "real operations expose the constraints generic tools miss."}`;
+  const instagramCopy = `${mediaPhrase ? `${capitalizeFirst(mediaPhrase)} tells the story.` : intent}\n\n${mediaNote ? `What it shows: ${mediaNote}` : `A closer look at ${contentAngle.toLowerCase()}.`}\n\nThe point is not polish. It is staying close enough to the real process to build something useful.\n\n${platformHasUsefulHashtags("Instagram") ? "#manufacturing #automation #industrialtech" : ""}`.trim();
+  const tiktokCopy = `Hook: ${bold ? "Most automation misses this part." : "This is where automation work gets real."}\n\nShort script:\n1. Start on ${mediaPhrase || "the uploaded media"}.\n2. Point out the operational detail most people would skip.\n3. Explain why it matters: ${intent}.\n4. Close on the practical takeaway: build around the real workflow.\n\nCaption: ${intent}`;
   const templates: Record<Platform, string> = {
-    LinkedIn: concise
-      ? `${bold ? "The signal is simple:" : "Quick thought:"} ${intent}\n\n${mediaNote || proofLine}\n\nBuild closer to the real workflow.`
-      : `${profileLead} ${bold ? "automation work breaks when it is built too far from reality" : "the best automation work happens closest to the real workflow"}.\n\n${intent}\n\n${proofLine ? `The useful signal from this moment: ${proofLine}` : ""}${supportLine}\n\n${technical ? "The process detail matters: the system has to fit the handoffs, edge cases, and operational constraints already in motion." : "The takeaway is simple: build where the work actually happens, then let the product earn its way into the process."}\n\nRecommended media use: Use the media as the proof point for the opening line.\n\nOptional alt text: ${mediaNote || `Image connected to ${campaignName || contentAngle}.`}`,
-    X: `${bold ? "Strong signal:" : ""}${intent}\n\n${technical ? "The workflow details matter more than the pitch." : "The best signal is usually in the messy workflow, not the polished pitch."}\n\n${mediaNote ? `Media context: ${mediaNote}` : `Angle: ${contentAngle}.`}\n\nRecommended media use: Pair the media with this short takeaway.\n\nOptional alt text: ${mediaNote || `Media for ${campaignName || contentAngle}.`}`,
-    Instagram: `${intent}\n\n${mediaNote ? `What this moment shows: ${mediaNote}` : `A closer look at ${contentAngle.toLowerCase()}.`}\n\n${technical ? "The visible process matters because it shows where the system has to meet the real operation." : "The point is not to make the work look polished. It is to stay close enough to the real process to build something useful."}\n\nSuggested overlay text: ${mediaNote ? "Build where the workflow breaks" : contentAngle}\n\nCarousel slide ideas:\n1. The moment\n2. The workflow underneath it\n3. The pain point\n4. The build decision\n5. The takeaway\n\nCTA: Save this if your team is building around real operations.`,
-    TikTok: `Hook: ${bold ? "Most automation misses this part." : "The real product work is hiding in the workflow."}\n\nShort script:\n1. Open on the uploaded media.\n2. Point out the real-world context: ${mediaNote || contentAngle}.\n3. Explain why this matters: ${intent}.\n4. Show the operational detail most teams would miss.\n5. Close with the practical takeaway.\n\nSuggested overlay text: Build where the workflow breaks\n\nShot list:\n- Uploaded media as the opening visual\n- Highlight the key detail\n- Quick founder explanation\n- Final takeaway screen\n\nCaption: ${intent}\n\nCTA: Follow for more practical build notes.`
+    LinkedIn: linkedinCopy,
+    X: xCopy,
+    Instagram: instagramCopy,
+    TikTok: tiktokCopy
   };
 
   return selectedPlatforms.map((platform, index) => ({
@@ -1092,9 +1203,9 @@ function createMockPosts(
     score: Math.min(96, 84 + index * 3),
     generatedBy: "Mock",
     mediaUsed: Boolean(mediaContext?.filename || mediaContext?.notes),
-    postCopy: templates[platform],
-    content: templates[platform],
-    rationale: `Mock draft shaped for ${platform}. ${influenceLine} Used the ${contentAngle} angle, campaign intent, and available media/context.${templateLine}${styleLine}`,
+    postCopy: sanitizeConduitCopy(templates[platform]),
+    content: sanitizeConduitCopy(templates[platform]),
+    rationale: `Mock draft shaped for ${platform}. ${influenceLine} Used the ${contentAngle} angle, brief intent, Company Knowledge around ${knowledgePhrase}, and available media/context. ${approvedCadence}${templateLine}${styleLine}`,
     recommendedMediaUse:
       mediaContext?.filename || mediaContext?.notes
         ? "Use the media as the proof point and connect the opening line to what the audience can see or hear."
@@ -1251,7 +1362,7 @@ function demoKnowledgeBase(): LibrarySource[] {
       syncStatus: "Manual Only" as SyncStatus,
       lastChecked: "Demo",
       content: "Conduit helps industrial companies convert messy manual processes into dependable automation workflows. The wedge is staying close to operators, hardware, and existing systems instead of selling generic AI automation.",
-      notes: "Core positioning for demo campaigns.",
+      notes: "Core positioning for demo briefs.",
       updatedAt: "Demo"
     },
     {
@@ -1978,12 +2089,32 @@ export function SocialCommandCenter() {
     () => campaigns.find((campaign) => campaign.id === activeCampaignId) ?? campaigns[0],
     [activeCampaignId, campaigns]
   );
+  const activeCampaignComplete = isCampaignComplete(activeCampaign, postQueue);
 
   const allPosts = campaigns.flatMap((campaign) => campaign.posts);
   const approvedCount = allPosts.filter((post) => post.status === "approved").length;
   const rejectedCount = allPosts.filter((post) => post.status === "rejected").length;
   const draftCount = allPosts.filter((post) => post.status === "draft").length;
   const readyQueueCount = postQueue.filter((item) => normalizeQueueStatus(item.status) === "Ready").length;
+
+  function startNewPost() {
+    setCampaignName("");
+    setCampaignTemplate("Other / blank");
+    setContentAngle("");
+    setSimpleStyleChips(["Conduit default"]);
+    setIntent("");
+    setIdea("");
+    setSelectedPlatforms(["LinkedIn", "X", "Instagram"]);
+    setSelectedVoiceInfluenceIds([]);
+    setSelectedInspirationProfileIds([]);
+    setSelectedLibrarySourceIds([]);
+    setUseApprovedPosts(true);
+    setActiveCampaignId("");
+    clearMedia();
+    setGenerationError("");
+    setGenerationNotice("Ready for a new post.");
+    setScreen("New Campaign");
+  }
 
   function togglePlatform(platform: Platform) {
     setSelectedPlatforms((current) =>
@@ -2094,7 +2225,7 @@ export function SocialCommandCenter() {
       .filter((style) => simpleStyleChips.includes(style.label))
       .map((style) => style.instruction);
     const effectiveCampaignName =
-      campaignName.trim() || effectiveIntent.slice(0, 64) || "Untitled Campaign";
+      campaignName.trim() || effectiveIntent.slice(0, 64) || "Untitled Brief";
     const safePlatforms: Platform[] =
       selectedPlatforms.length > 0 ? selectedPlatforms : ["LinkedIn"];
     const selectedProfile = profiles.find(
@@ -2174,7 +2305,7 @@ export function SocialCommandCenter() {
     return buildCampaign(
       "Mock",
       createMockPosts(
-        campaignName.trim() || intent.trim().slice(0, 64) || "Untitled Campaign",
+        campaignName.trim() || intent.trim().slice(0, 64) || "Untitled Brief",
         intent.trim(),
         (contentAngle || campaignTemplateConfigs[campaignTemplate].contentAngle || "Company update") as ContentAngle,
         idea.trim() || intent.trim(),
@@ -2208,8 +2339,8 @@ export function SocialCommandCenter() {
       saveCampaignToSupabase(campaignWithSafety, mediaFile).catch((error) => {
         setQueueDebugMessage(
           error instanceof Error
-            ? `Campaign save failed: ${error.message}`
-            : "Campaign save failed."
+            ? `Brief save failed: ${error.message}`
+            : "Brief save failed."
         );
         setGenerationNotice(
           "Saved in this session. Shared sync needs attention."
@@ -2478,7 +2609,7 @@ export function SocialCommandCenter() {
         contentAngle || campaignTemplateConfigs[campaignTemplate].contentAngle || "Company update";
       const effectiveRawIdea = idea.trim() || intent.trim();
       const effectiveCampaignTitle =
-        campaignName.trim() || intent.trim().slice(0, 64) || "Untitled Campaign";
+        campaignName.trim() || intent.trim().slice(0, 64) || "Untitled Brief";
       const generationImageDataUrl = imageDataUrlForGeneration(mediaContext, mediaImageDataUrl);
       if (mediaContext.type === "image" && mediaImageDataUrl && !generationImageDataUrl) {
         setGenerationNotice("Using your media notes and saved image analysis for generation.");
@@ -2570,7 +2701,7 @@ export function SocialCommandCenter() {
     const confirmed = window.confirm(
       storageMode === "supabase"
         ? "Reset local test data in this browser? Shared data will not be deleted."
-        : "Reset all local Social Command Center test data in this browser? This clears campaigns, posts, Brand Voice Rules, hidden legacy voice sources, Company Knowledge items, and imports."
+        : "Reset all local Social Command Center test data in this browser? This clears briefs, posts, Brand Voice Rules, hidden legacy voice sources, Company Knowledge items, and imports."
     );
     if (!confirmed) {
       return;
@@ -2617,7 +2748,7 @@ export function SocialCommandCenter() {
 
   function loadDemoData() {
     const confirmed = window.confirm(
-      "This will add sample demo profiles, knowledge base items, brand rules, campaigns, and approved examples. It will not delete existing data."
+      "This will add sample demo profiles, knowledge base items, brand rules, content briefs, and approved examples. It will not delete existing data."
     );
     if (!confirmed) return;
 
@@ -2648,8 +2779,8 @@ export function SocialCommandCenter() {
       saveCampaignToSupabase(campaignDemo).catch((error) => {
         setQueueDebugMessage(
           error instanceof Error
-            ? `Demo campaign save failed: ${error.message}`
-            : "Demo campaign save failed."
+            ? `Demo brief save failed: ${error.message}`
+            : "Demo brief save failed."
         );
         setGenerationNotice(
           "Demo data loaded. Shared sync needs attention."
@@ -2731,8 +2862,8 @@ export function SocialCommandCenter() {
       deleteCampaignFromSupabase(campaignId).catch((error) => {
         setQueueDebugMessage(
           error instanceof Error
-            ? `Campaign delete failed: ${error.message}`
-            : "Campaign delete failed."
+            ? `Brief delete failed: ${error.message}`
+            : "Brief delete failed."
         );
         setGenerationNotice(
           "Removed from this session. Shared sync needs attention."
@@ -2873,6 +3004,7 @@ export function SocialCommandCenter() {
       livePostUrl: "",
       postedAt: "",
       publishNotes: "",
+      isSandbox: false,
       metrics: {},
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString()
@@ -2935,7 +3067,7 @@ export function SocialCommandCenter() {
   async function approvePost(post: GeneratedPost) {
     const campaign = activeCampaign;
     if (!campaign) {
-      const message = "failed to update generated post: no active campaign found.";
+      const message = "failed to update generated post: no active brief found.";
       console.error("[SCC] Approve failed", { step: "active campaign", postId: post.id });
       setGenerationError(friendlyApprovalMessage("failed"));
       setApproveDebug({
@@ -3187,6 +3319,7 @@ export function SocialCommandCenter() {
       livePostUrl: "",
       postedAt: "",
       publishNotes: "",
+      isSandbox: false,
       metrics: {},
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString()
@@ -3259,17 +3392,19 @@ export function SocialCommandCenter() {
 
   function createMockRegeneratedPost(post: GeneratedPost, instruction: string) {
     const mediaNote = mediaContext.notes || activeCampaign?.mediaContext?.notes || "";
-    const intentLine = activeCampaign?.intent || intent || "the current campaign intent";
+    const intentLine = activeCampaign?.intent || intent || "the current brief intent";
     const angleLine = activeCampaign?.contentAngle || contentAngle || "the selected content angle";
+    const mediaPhrase = concreteMediaPhrase(activeCampaign?.mediaContext ?? mediaContext);
     const platformCopy: Record<Platform, string> = {
-      LinkedIn: `I keep coming back to this: ${intentLine}\n\n${mediaNote ? `The media makes it concrete: ${mediaNote}\n\n` : ""}The requested change here is to ${instruction.toLowerCase()}.\n\nThe takeaway is simple: build from the real workflow, then make the product prove itself there.`,
-      X: `${intentLine}\n\n${instruction}\n\n${mediaNote ? `Signal: ${mediaNote}` : `Angle: ${angleLine}`}`,
-      Instagram: `${intentLine}\n\n${mediaNote ? `What this shows: ${mediaNote}` : `Angle: ${angleLine}`}\n\n${instruction}`,
-      TikTok: `Hook: ${intentLine}\n\nShort script:\n1. Open on the media.\n2. Call out the real-world context.\n3. Make the requested change clear: ${instruction}.\n4. End with the practical takeaway.`
+      LinkedIn: `The useful detail is in the operation, not the announcement.\n\n${intentLine}\n\n${mediaPhrase ? `${capitalizeFirst(mediaPhrase)} makes the constraint visible. ` : ""}${mediaNote ? `${mediaNote}\n\n` : ""}Make the edit this way: ${instruction.toLowerCase()}.\n\nThe takeaway: build from the real workflow, then make the product prove itself there.`,
+      X: `${intentLine}\n\n${mediaPhrase ? `${capitalizeFirst(mediaPhrase)} is the proof point. ` : ""}${instruction}`,
+      Instagram: `${mediaPhrase ? `${capitalizeFirst(mediaPhrase)} is the post.` : intentLine}\n\n${mediaNote ? `What it shows: ${mediaNote}` : `Angle: ${angleLine}`}\n\n${instruction}`,
+      TikTok: `Hook: This is where the operation gets real.\n\nShort script:\n1. Open on ${mediaPhrase || "the media"}.\n2. Call out the operational detail.\n3. Explain the point: ${intentLine}.\n4. Make the requested change clear: ${instruction}.\n5. End with the practical takeaway.`
     };
+    const copy = sanitizeConduitCopy(platformCopy[post.platform]);
     return {
-      postCopy: platformCopy[post.platform],
-      content: platformCopy[post.platform],
+      postCopy: copy,
+      content: copy,
       rationale: `Regenerated with the instruction: ${instruction}`,
       recommendedMediaUse: "Use the uploaded media as the proof point and connect the copy directly to the requested change.",
       altText: mediaNote,
@@ -3653,6 +3788,7 @@ export function SocialCommandCenter() {
               storageMode={storageMode}
               loadDemoData={loadDemoData}
               clearDemoData={clearDemoData}
+              startNewPost={startNewPost}
             />
           )}
           {screen === "Analytics" && (
@@ -3776,6 +3912,7 @@ export function SocialCommandCenter() {
               handleGenerate={handleGenerate}
               handleMockFallback={handleMockFallback}
               createDefaultConduitProfile={createDefaultConduitProfile}
+              campaignComplete={activeCampaignComplete}
             />
           )}
           {screen === "Repurpose" && (
@@ -3823,11 +3960,16 @@ export function SocialCommandCenter() {
               mediaPreviewUrl={mediaPreviewUrl}
               queueDebugMessage={queueDebugMessage}
               storageMode={storageMode}
+              activeCampaign={activeCampaign}
+              activeCampaignComplete={activeCampaignComplete}
+              startNewPost={startNewPost}
+              repurposeCampaign={openRepurposeCampaign}
             />
           )}
           {screen === "Review Drafts" && (
             <ResultsEditor
               campaign={activeCampaign}
+              campaignComplete={activeCampaignComplete}
               rawIdeaIsGeneric={Boolean(
                 activeCampaign?.idea.trim() && looksLikeGenericRawIdea(activeCampaign.idea)
               )}
@@ -3842,6 +3984,8 @@ export function SocialCommandCenter() {
               approveDebug={approveDebug}
               setScreen={setScreen}
               mediaPreviewUrl={mediaPreviewUrl}
+              startNewPost={startNewPost}
+              repurposeCampaign={openRepurposeCampaign}
             />
           )}
         </section>
@@ -4043,7 +4187,7 @@ function Header({
       </div>
       {activeCampaign && (
         <div className="rounded-md border border-slate-200 bg-white px-4 py-3 text-sm shadow-sm">
-          <span className="text-xs font-bold uppercase tracking-wide text-muted-foreground">Active campaign</span>
+          <span className="text-xs font-bold uppercase tracking-wide text-muted-foreground">Active brief</span>
           <p className="font-semibold">{activeCampaign.name}</p>
         </div>
       )}
@@ -4067,7 +4211,8 @@ function Dashboard({
   readyQueueCount,
   storageMode,
   loadDemoData,
-  clearDemoData
+  clearDemoData,
+  startNewPost
 }: {
   campaigns: Campaign[];
   activeCampaignId: string;
@@ -4085,6 +4230,7 @@ function Dashboard({
   storageMode: StorageMode;
   loadDemoData: () => void;
   clearDemoData: () => void;
+  startNewPost: () => void;
 }) {
   return (
     <div className="space-y-6">
@@ -4097,7 +4243,7 @@ function Dashboard({
             </p>
           </div>
           <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-5">
-            <Button onClick={() => setScreen("New Campaign")}>Create a post</Button>
+            <Button onClick={startNewPost}>Create a post</Button>
             <Button variant="secondary" onClick={() => setScreen("Review Drafts")}>Review drafts</Button>
             <Button variant="secondary" onClick={() => setScreen("Ready to Post")}>Ready to post</Button>
             <Button variant="secondary" onClick={() => setScreen("Repurpose")}>Repurpose content</Button>
@@ -4107,9 +4253,9 @@ function Dashboard({
       </Card>
 
       <div className="grid gap-4 md:grid-cols-3 xl:grid-cols-5">
-        <Metric label="Drafts across campaigns" value={draftCount} />
-        <Metric label="Approved across campaigns" value={approvedCount} />
-        <Metric label="Rejected across campaigns" value={rejectedCount} />
+        <Metric label="Drafts across briefs" value={draftCount} />
+        <Metric label="Approved across briefs" value={approvedCount} />
+        <Metric label="Rejected across briefs" value={rejectedCount} />
         <Metric label="Saved profiles" value={profileCount} />
         <Metric label="Ready to post" value={readyQueueCount} />
       </div>
@@ -4118,7 +4264,7 @@ function Dashboard({
         <Card className="p-5">
           <div className="mb-4 flex items-center justify-between gap-3">
             <div>
-              <h3 className="text-lg font-bold">Recent campaigns</h3>
+              <h3 className="text-lg font-bold">Recent briefs</h3>
               <p className="text-sm text-muted-foreground">
                 Plan Conduit posts, founder-led updates, and repurposed content from one workflow.
               </p>
@@ -4179,14 +4325,14 @@ function Dashboard({
                       variant="secondary"
                       onClick={() => repurposeCampaign(campaign)}
                     >
-                      Repurpose campaign
+                      Repurpose brief
                     </Button>
                     <Button
                       size="sm"
                       variant="danger"
                       onClick={() => deleteCampaign(campaign.id)}
                     >
-                      Delete campaign
+                      Delete brief
                     </Button>
                   </div>
                 </div>
@@ -4225,7 +4371,7 @@ function Dashboard({
               <div>
                 <h3 className="text-lg font-bold">Demo mode</h3>
                 <p className="mt-1 text-sm leading-6 text-muted-foreground">
-                  Load labeled sample profiles, Company Knowledge items, Brand Voice Rules, a campaign, and approved examples for presentations.
+                  Load labeled sample profiles, Company Knowledge items, Brand Voice Rules, a content brief, and approved examples for presentations.
                 </p>
               </div>
             </div>
@@ -4309,9 +4455,13 @@ function Analytics({
   postQueue: PostQueueItem[];
   setScreen: (screen: Screen) => void;
 }) {
+  const [postTypeFilter, setPostTypeFilter] = useState<"All" | "Sandbox" | "Real">("All");
   const analytics = queueAnalytics(postQueue);
-  const postedItems = postQueue.filter(
-    (item) => normalizeQueueStatus(item.status) === "Posted"
+  const allPostedItems = postQueue.filter((item) => normalizeQueueStatus(item.status) === "Posted");
+  const postedItems = allPostedItems.filter(
+    (item) =>
+      postTypeFilter === "All" ||
+      (postTypeFilter === "Sandbox" ? item.isSandbox : !item.isSandbox)
   );
 
   return (
@@ -4327,6 +4477,25 @@ function Analytics({
           <Button variant="secondary" onClick={() => setScreen("Ready to Post")}>
             Update metrics
           </Button>
+        </div>
+        <div className="mt-4 flex flex-wrap gap-2">
+          {(["All", "Real", "Sandbox"] as const).map((filter) => (
+            <button
+              key={filter}
+              type="button"
+              onClick={() => setPostTypeFilter(filter)}
+              className={cn(
+                "rounded-md border px-3 py-2 text-sm font-bold",
+                postTypeFilter === filter
+                  ? "border-primary bg-primary text-primary-foreground"
+                  : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"
+              )}
+            >
+              {filter === "All" ? "All posted" : filter}
+            </button>
+          ))}
+          <Pill>Real: {allPostedItems.filter((item) => !item.isSandbox).length}</Pill>
+          <Pill>Sandbox: {allPostedItems.filter((item) => item.isSandbox).length}</Pill>
         </div>
       </Card>
 
@@ -4384,6 +4553,7 @@ function Analytics({
                     </p>
                   </div>
                   <div className="flex flex-wrap gap-2">
+                    <Pill>{item.isSandbox ? "Sandbox/test post" : "Real post"}</Pill>
                     <Pill>{metricNumber(item.metrics?.impressions)} impressions</Pill>
                     <Pill>{metricNumber(item.metrics?.likes)} likes</Pill>
                     <Pill>{metricNumber(item.metrics?.comments)} comments</Pill>
@@ -4596,6 +4766,13 @@ type ContentLibraryItem = {
   intent?: string;
   status: PostStatus | QueueStatus;
   mediaUsed: boolean;
+  mediaAssetName?: string;
+  mediaPublicUrl?: string;
+  livePostUrl?: string;
+  postedAt?: string;
+  publishNotes?: string;
+  isSandbox?: boolean;
+  safetyStatus?: BrandSafetyCheck["status"];
   readinessScore?: number;
   metrics?: PostQueueItem["metrics"];
   createdAt: string;
@@ -4634,7 +4811,11 @@ function ContentLibrary({
   const [campaignFilter, setCampaignFilter] = useState("All");
   const [mediaFilter, setMediaFilter] = useState("All");
   const [typeFilter, setTypeFilter] = useState("All");
+  const [postTypeFilter, setPostTypeFilter] = useState<"All" | "Sandbox" | "Real">("All");
+  const [sortMode, setSortMode] = useState("Newest first");
+  const [libraryTab, setLibraryTab] = useState("All");
   const [previewItemId, setPreviewItemId] = useState("");
+  const [detailItemId, setDetailItemId] = useState("");
   const [copyState, setCopyState] = useState("");
 
   const items = useMemo(
@@ -4653,22 +4834,38 @@ function ContentLibrary({
       .join(" ")
       .toLowerCase();
     const matchesSearch = !query.trim() || haystack.includes(query.trim().toLowerCase());
+    const matchesLibraryTab =
+      libraryTab === "All" ||
+      (libraryTab === "Drafts" && contentStatusLabel(item.status) === "Draft") ||
+      (libraryTab === "Approved" && contentStatusLabel(item.status) === "Approved") ||
+      (libraryTab === "Ready" && contentStatusLabel(item.status) === "Ready") ||
+      (libraryTab === "Posted" && contentStatusLabel(item.status) === "Posted") ||
+      (libraryTab === "Archived" && contentStatusLabel(item.status) === "Archived") ||
+      (libraryTab === "Repurposed" && item.campaignType === "Repurposed") ||
+      (libraryTab === "Top Performing" &&
+        contentStatusLabel(item.status) === "Posted" &&
+        contentEngagementTotal(item) > 0);
     return (
       matchesSearch &&
+      matchesLibraryTab &&
       (statusFilter === "All" || item.status === statusFilter) &&
       (platformFilter === "All" || item.platform === platformFilter) &&
       (profileFilter === "All" || item.profileId === profileFilter || item.postingAccount === profileFilter) &&
       (campaignFilter === "All" || item.campaignId === campaignFilter) &&
       (mediaFilter === "All" || (mediaFilter === "Media used" ? item.mediaUsed : !item.mediaUsed)) &&
-      (typeFilter === "All" || item.campaignType === typeFilter)
+      (typeFilter === "All" || item.campaignType === typeFilter) &&
+      (postTypeFilter === "All" ||
+        (postTypeFilter === "Sandbox" ? item.isSandbox : !item.isSandbox))
     );
-  });
-  const topPerforming = postQueue
-    .filter((item) => normalizeQueueStatus(item.status) === "Posted")
-    .sort((a, b) => engagementTotal(b) - engagementTotal(a))
+  }).sort((a, b) => sortContentItems(a, b, sortMode));
+  const topPerforming = items
+    .filter((item) => contentStatusLabel(item.status) === "Posted" && contentEngagementTotal(item) > 0)
+    .sort((a, b) => contentEngagementTotal(b) - contentEngagementTotal(a))
     .slice(0, 3);
   const profileOptions = uniqueStrings(items.map((item) => item.profileId || item.postingAccount).filter(Boolean));
   const campaignOptions = campaigns.map((campaign) => ({ id: campaign.id, name: campaign.name }));
+  const detailItem = items.find((item) => item.id === detailItemId);
+  const libraryTabs = ["All", "Drafts", "Approved", "Ready", "Posted", "Archived", "Repurposed", "Top Performing"];
 
   async function copyItem(item: ContentLibraryItem) {
     try {
@@ -4697,7 +4894,15 @@ function ContentLibrary({
       createdAt: item.createdAt,
       profileId: item.profileId,
       profileName: item.postingAccount,
-      profileType: profile?.type
+      profileType: profile?.type,
+      mediaContext: item.mediaUsed
+        ? {
+            filename: item.mediaAssetName,
+            assetName: item.mediaAssetName,
+            publicUrl: item.mediaPublicUrl,
+            notes: item.publishNotes
+          }
+        : undefined
     };
     const post: GeneratedPost = {
       id: item.id,
@@ -4712,6 +4917,16 @@ function ContentLibrary({
             : "approved",
       score: item.readinessScore ?? 85,
       mediaUsed: item.mediaUsed,
+      rationale: item.queueItem?.rationale,
+      recommendedMediaUse: item.queueItem?.recommendedMediaUse,
+      altText: item.queueItem?.altText,
+      overlayText: item.queueItem?.overlayText,
+      cta: item.queueItem?.cta,
+      hashtags: item.queueItem?.hashtags,
+      firstComment: item.queueItem?.firstComment,
+      carouselIdeas: item.queueItem?.carouselIdeas,
+      shotList: item.queueItem?.shotList,
+      safetyCheck: item.queueItem?.safetyCheck,
       profileId: item.profileId,
       profileName: item.postingAccount,
       profileType: profile?.type
@@ -4731,7 +4946,7 @@ function ContentLibrary({
           <div>
             <h3 className="text-xl font-extrabold tracking-tight">Content Library</h3>
             <p className="mt-1 max-w-2xl text-sm leading-6 text-muted-foreground">
-              Search every draft, approval, queue item, posted post, archived post, and repurposed idea created in the app.
+              Permanent archive for every Conduit draft, approval, ready post, posted item, and repurposed brief.
             </p>
           </div>
           <Button onClick={() => setScreen("New Campaign")}>
@@ -4741,19 +4956,55 @@ function ContentLibrary({
       </Card>
 
       <Card className="p-5">
-        <div className="grid gap-3 lg:grid-cols-[1.5fr_repeat(6,minmax(0,1fr))]">
+        <div className="mb-4 flex flex-wrap gap-2">
+          {libraryTabs.map((tab) => (
+            <button
+              key={tab}
+              type="button"
+              onClick={() => {
+                setLibraryTab(tab);
+                setStatusFilter("All");
+              }}
+              className={cn(
+                "rounded-md border px-3 py-2 text-sm font-bold transition",
+                libraryTab === tab
+                  ? "border-primary bg-primary text-primary-foreground shadow-sm"
+                  : "border-slate-200 bg-white text-slate-600 hover:border-teal-200 hover:bg-teal-50"
+              )}
+            >
+              {tab}
+            </button>
+          ))}
+        </div>
+        <div className="grid gap-3 lg:grid-cols-[1.5fr_repeat(8,minmax(0,1fr))]">
           <input
             value={query}
             onChange={(event) => setQuery(event.target.value)}
             className="h-10 rounded-md border border-input bg-white px-3 text-sm outline-none focus:ring-2 focus:ring-ring"
-            placeholder="Search post copy, campaign, intent, platform, account..."
+            placeholder="Search post copy, brief, intent, platform, account..."
           />
           <ContentFilter value={statusFilter} onChange={setStatusFilter} options={["All", "draft", "approved", "rejected", "Ready", "Scheduled", "Posted", "Archived"]} />
           <ContentFilter value={platformFilter} onChange={setPlatformFilter} options={["All", ...platforms]} />
           <ContentFilter value={profileFilter} onChange={setProfileFilter} options={["All", ...profileOptions]} />
-          <ContentFilter value={campaignFilter} onChange={setCampaignFilter} options={["All", ...campaignOptions.map((item) => item.id)]} labels={Object.fromEntries(campaignOptions.map((item) => [item.id, item.name]))} />
+          <ContentFilter value={campaignFilter} onChange={setCampaignFilter} options={["All", ...campaignOptions.map((item) => item.id)]} labels={{ All: "All briefs", ...Object.fromEntries(campaignOptions.map((item) => [item.id, item.name])) }} />
           <ContentFilter value={mediaFilter} onChange={setMediaFilter} options={["All", "Media used", "No media"]} />
           <ContentFilter value={typeFilter} onChange={setTypeFilter} options={["All", "Original", "Repurposed"]} />
+          <ContentFilter value={postTypeFilter} onChange={(value) => setPostTypeFilter(value as typeof postTypeFilter)} options={["All", "Real", "Sandbox"]} labels={{ All: "All post types", Real: "Real posts only", Sandbox: "Sandbox/test" }} />
+          <ContentFilter value={sortMode} onChange={setSortMode} options={["Newest first", "Oldest first", "Highest engagement", "Highest impressions", "Highest readiness score"]} />
+        </div>
+        <div className="mt-3 flex flex-wrap gap-2">
+          <Button size="sm" variant={statusFilter === "Posted" ? "primary" : "secondary"} onClick={() => {
+            setLibraryTab("All");
+            setStatusFilter("Posted");
+          }}>
+            Posted
+          </Button>
+          <Button size="sm" variant={postTypeFilter === "Sandbox" ? "primary" : "secondary"} onClick={() => setPostTypeFilter("Sandbox")}>
+            Sandbox/test
+          </Button>
+          <Button size="sm" variant={postTypeFilter === "Real" ? "primary" : "secondary"} onClick={() => setPostTypeFilter("Real")}>
+            Real posts only
+          </Button>
         </div>
         <p className="mt-3 text-sm text-muted-foreground">
           Showing {filteredItems.length} of {items.length} content items.
@@ -4770,19 +5021,20 @@ function ContentLibrary({
         </div>
         <div className="mt-4 grid gap-3 lg:grid-cols-3">
           {topPerforming.length === 0 ? (
-            <p className="rounded-lg border border-dashed border-slate-300 bg-slate-50 p-4 text-sm text-muted-foreground lg:col-span-3">
-              Mark posts as posted and add metrics to see top performers.
+          <p className="rounded-lg border border-dashed border-slate-300 bg-slate-50 p-4 text-sm text-muted-foreground lg:col-span-3">
+              Add metrics to posted items to see top performers.
             </p>
           ) : (
             topPerforming.map((item) => (
               <div key={item.id} className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
                 <div className="flex flex-wrap gap-2">
                   <Pill>{item.platform}</Pill>
-                  <Pill>{engagementTotal(item)} engagement</Pill>
+                  <Pill>{contentEngagementTotal(item)} engagement</Pill>
+                  {item.isSandbox && <Pill>Sandbox/test</Pill>}
                 </div>
-                <p className="mt-3 line-clamp-3 text-sm leading-6">{item.postCopy || item.content}</p>
+                <p className="mt-3 line-clamp-3 text-sm leading-6">{item.postCopy}</p>
                 <p className="mt-3 text-xs font-bold uppercase tracking-wide text-muted-foreground">
-                  {metricNumber(item.metrics?.impressions)} impressions · {engagementRate(item)} engagement rate
+                  {metricNumber(item.metrics?.impressions)} impressions · {contentEngagementRate(item)} engagement rate
                 </p>
               </div>
             ))
@@ -4801,20 +5053,40 @@ function ContentLibrary({
             const preview = previewPostForItem(item);
             const isPreviewing = previewItemId === item.id;
             return (
-              <Card key={item.id} className="p-4">
+              <Card
+                key={item.id}
+                className={cn(
+                  "p-4",
+                  contentStatusLabel(item.status) === "Posted" && "border-teal-200 bg-teal-50/30",
+                  contentStatusLabel(item.status) === "Draft" && "border-slate-200 bg-white"
+                )}
+              >
                 <div className="flex flex-col justify-between gap-3 lg:flex-row lg:items-start">
                   <div className="min-w-0">
                     <div className="flex flex-wrap gap-2">
                       <Pill>{item.platform}</Pill>
                       <Pill>{contentStatusLabel(item.status)}</Pill>
                       <Pill>{item.campaignType}</Pill>
+                      {item.isSandbox && <Pill>Sandbox/test</Pill>}
                       {item.mediaUsed && <Pill>Media used</Pill>}
                       {typeof item.readinessScore === "number" && <Pill>Readiness {item.readinessScore}/100</Pill>}
+                      {item.safetyStatus && <Pill>Safety: {item.safetyStatus}</Pill>}
                     </div>
-                    <p className="mt-3 whitespace-pre-wrap text-sm leading-6">{item.postCopy}</p>
+                    <p className="mt-3 line-clamp-2 text-sm leading-6">{item.postCopy}</p>
                     <p className="mt-3 text-xs font-bold uppercase tracking-wide text-muted-foreground">
-                      {item.postingAccount} · {item.campaignName} · {item.contentAngle || "No angle"} · {formatShortDate(item.createdAt)}
+                      {item.postingAccount} · {item.campaignName} · {item.contentAngle || "No angle"} · {formatShortDateTime(item.postedAt || item.createdAt)}
                     </p>
+                    {contentStatusLabel(item.status) === "Posted" && (
+                      <div className="mt-3 grid gap-2 text-sm md:grid-cols-2">
+                        <BriefItem label="Live URL" value={item.livePostUrl || "No live URL saved"} />
+                        <BriefItem label="Posted" value={formatShortDateTime(item.postedAt)} />
+                      </div>
+                    )}
+                    {contentStatusLabel(item.status) === "Draft" && (
+                      <p className="mt-3 rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-sm font-semibold text-slate-600">
+                        Draft only. Review and approve it when ready.
+                      </p>
+                    )}
                     {item.metrics && contentStatusLabel(item.status) === "Posted" && (
                       <div className="mt-3 flex flex-wrap gap-2">
                         <Pill>{metricNumber(item.metrics.impressions)} impressions</Pill>
@@ -4823,7 +5095,7 @@ function ContentLibrary({
                         <Pill>{metricNumber(item.metrics.shares)} shares</Pill>
                         <Pill>{metricNumber(item.metrics.saves)} saves</Pill>
                         <Pill>{metricNumber(item.metrics.clicks)} clicks</Pill>
-                        <Pill>{engagementRate(item.queueItem)} engagement rate</Pill>
+                        <Pill>{contentEngagementRate(item)} engagement rate</Pill>
                       </div>
                     )}
                   </div>
@@ -4834,12 +5106,20 @@ function ContentLibrary({
                     <Button size="sm" variant="secondary" onClick={() => setPreviewItemId(isPreviewing ? "" : item.id)}>
                       {isPreviewing ? "Hide preview" : "Preview"}
                     </Button>
+                    <Button size="sm" variant="secondary" onClick={() => setDetailItemId(item.id)}>
+                      Details
+                    </Button>
                     <Button size="sm" variant="secondary" onClick={() => repurposeItem(item)}>
                       <Repeat2 size={14} /> Repurpose
                     </Button>
                     {item.approvedMemory && !item.queueItem && (
                       <Button size="sm" onClick={() => moveApprovedToQueue(item.approvedMemory!)}>
                         Move to Ready
+                      </Button>
+                    )}
+                    {contentStatusLabel(item.status) === "Draft" && (
+                      <Button size="sm" variant="secondary" onClick={() => setScreen("Review Drafts")}>
+                        Review draft
                       </Button>
                     )}
                     {item.queueItem && normalizeQueueStatus(item.queueItem.status) !== "Archived" && (
@@ -4862,6 +5142,16 @@ function ContentLibrary({
             );
           })}
         </div>
+      )}
+      {detailItem && (
+        <ContentDetailPanel
+          item={detailItem}
+          preview={previewPostForItem(detailItem)}
+          mediaPreviewUrl={mediaPreviewUrl}
+          onClose={() => setDetailItemId("")}
+          onCopy={() => copyItem(detailItem)}
+          onRepurpose={() => repurposeItem(detailItem)}
+        />
       )}
     </div>
   );
@@ -4890,6 +5180,162 @@ function ContentFilter({
         </option>
       ))}
     </select>
+  );
+}
+
+function ContentDetailPanel({
+  item,
+  preview,
+  mediaPreviewUrl,
+  onClose,
+  onCopy,
+  onRepurpose
+}: {
+  item: ContentLibraryItem;
+  preview: { post: GeneratedPost; campaign: Campaign };
+  mediaPreviewUrl: string;
+  onClose: () => void;
+  onCopy: () => void;
+  onRepurpose: () => void;
+}) {
+  const [tab, setTab] = useState("Overview");
+  const details = supportingDetailsFromPost(preview.post);
+  const tabs = ["Overview", "Post Copy", "Media", "Metrics", "Source Brief", "Repurpose"];
+
+  return (
+    <div className="fixed inset-0 z-50 flex justify-end bg-slate-950/35 p-4">
+      <div className="flex h-full w-full max-w-4xl flex-col overflow-hidden rounded-xl border border-slate-200 bg-white shadow-2xl">
+        <div className="flex flex-col justify-between gap-3 border-b border-slate-200 p-5 sm:flex-row sm:items-start">
+          <div>
+            <p className="text-xs font-extrabold uppercase tracking-wide text-primary">Content details</p>
+            <h3 className="mt-1 text-xl font-extrabold tracking-tight">{item.campaignName}</h3>
+            <p className="mt-1 text-sm text-muted-foreground">{item.platform} · {item.postingAccount}</p>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <Button size="sm" variant="secondary" onClick={onCopy}>
+              <Clipboard size={14} /> Copy
+            </Button>
+            <Button size="sm" onClick={onRepurpose}>
+              <Repeat2 size={14} /> Repurpose
+            </Button>
+            <Button size="sm" variant="secondary" onClick={onClose}>Close</Button>
+          </div>
+        </div>
+        <div className="flex gap-2 overflow-x-auto border-b border-slate-200 p-3">
+          {tabs.map((itemTab) => (
+            <button
+              key={itemTab}
+              type="button"
+              onClick={() => setTab(itemTab)}
+              className={cn(
+                "whitespace-nowrap rounded-md px-3 py-2 text-sm font-bold",
+                tab === itemTab
+                  ? "bg-primary text-primary-foreground"
+                  : "bg-slate-50 text-slate-600 hover:bg-slate-100"
+              )}
+            >
+              {itemTab}
+            </button>
+          ))}
+        </div>
+        <div className="min-h-0 flex-1 overflow-y-auto p-5">
+          {tab === "Overview" && (
+            <div className="grid gap-3 md:grid-cols-2">
+              <BriefItem label="Platform" value={item.platform} />
+              <BriefItem label="Posting account" value={item.postingAccount} />
+              <BriefItem label="Status" value={contentStatusLabel(item.status)} />
+              <BriefItem label="Content brief" value={item.campaignName} />
+              <BriefItem label="Content angle" value={item.contentAngle || "No angle saved"} />
+              <BriefItem label="Intent" value={item.intent || "No intent saved"} />
+              <BriefItem label="Live URL" value={item.livePostUrl || "No live URL saved"} />
+              <BriefItem label="Posted" value={formatShortDateTime(item.postedAt)} />
+              <BriefItem label="Post type" value={item.isSandbox ? "Sandbox/test post" : "Real post"} />
+              <BriefItem label="Readiness" value={typeof item.readinessScore === "number" ? `${item.readinessScore}/100` : "Not scored"} />
+              <BriefItem label="Brand safety" value={item.safetyStatus || "Not checked"} />
+            </div>
+          )}
+
+          {tab === "Post Copy" && (
+            <div className="space-y-4">
+              <div className="rounded-lg border border-slate-200 bg-slate-50 p-4">
+                <p className="whitespace-pre-wrap text-sm leading-6">{item.postCopy}</p>
+              </div>
+              {details.length > 0 ? (
+                <div className="grid gap-3 md:grid-cols-2">
+                  {details.map((detail) => (
+                    <BriefItem key={detail.label} label={detail.label} value={detail.value} />
+                  ))}
+                </div>
+              ) : (
+                <p className="rounded-md border border-dashed border-slate-300 bg-slate-50 p-4 text-sm text-muted-foreground">
+                  No supporting fields saved for this post.
+                </p>
+              )}
+            </div>
+          )}
+
+          {tab === "Media" && (
+            <div className="space-y-4">
+              {item.mediaUsed ? (
+                <>
+                  <MediaPreviewFrame campaign={preview.campaign} mediaPreviewUrl={item.mediaPublicUrl || mediaPreviewUrl} className="max-h-[420px]" />
+                  <div className="grid gap-3 md:grid-cols-2">
+                    <BriefItem label="Media asset" value={item.mediaAssetName || "Media used"} />
+                    <BriefItem label="Media notes" value={preview.campaign.mediaContext?.notes || "No media notes saved"} />
+                    <BriefItem label="AI analysis" value={preview.campaign.mediaContext?.analysis?.description || "No media analysis saved"} />
+                  </div>
+                </>
+              ) : (
+                <p className="rounded-md border border-dashed border-slate-300 bg-slate-50 p-4 text-sm text-muted-foreground">
+                  No media was used for this post.
+                </p>
+              )}
+            </div>
+          )}
+
+          {tab === "Metrics" && (
+            <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-4">
+              <Metric label="Impressions" value={metricNumber(item.metrics?.impressions)} />
+              <Metric label="Likes" value={metricNumber(item.metrics?.likes)} />
+              <Metric label="Comments" value={metricNumber(item.metrics?.comments)} />
+              <Metric label="Shares" value={metricNumber(item.metrics?.shares)} />
+              <Metric label="Saves" value={metricNumber(item.metrics?.saves)} />
+              <Metric label="Clicks" value={metricNumber(item.metrics?.clicks)} />
+              <Card className="p-5">
+                <p className="text-sm font-semibold text-muted-foreground">Engagement rate</p>
+                <p className="mt-2 text-2xl font-bold">{engagementRate(item.queueItem)}</p>
+              </Card>
+              <div className="lg:col-span-4">
+                <BriefItem label="Notes" value={item.publishNotes || "No publishing notes saved"} />
+              </div>
+            </div>
+          )}
+
+          {tab === "Source Brief" && (
+            <div className="grid gap-3 md:grid-cols-2">
+              <BriefItem label="Original brief" value={item.campaignName} />
+              <BriefItem label="Brief type" value={item.campaignType} />
+              <BriefItem label="Rationale" value={preview.post.rationale || "No rationale saved"} />
+              <BriefItem label="Source" value={item.source} />
+              <BriefItem label="Intent" value={item.intent || "No intent saved"} />
+              <BriefItem label="Content angle" value={item.contentAngle || "No content angle saved"} />
+            </div>
+          )}
+
+          {tab === "Repurpose" && (
+            <div className="rounded-lg border border-teal-200 bg-teal-50 p-5">
+              <p className="font-bold text-teal-900">Repurpose this posted content</p>
+              <p className="mt-2 text-sm leading-6 text-teal-900">
+                Turn this historical post into new platform-native drafts while keeping the original record intact.
+              </p>
+              <Button className="mt-4" onClick={onRepurpose}>
+                <Repeat2 size={16} /> Repurpose this post
+              </Button>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
   );
 }
 
@@ -4922,6 +5368,13 @@ function buildContentLibraryItems(
         intent: campaign.intent,
         status: queueItem?.status ?? post.status,
         mediaUsed: Boolean(queueItem?.mediaUsed || post.mediaUsed || campaign.mediaContext?.filename),
+        mediaAssetName: queueItem?.mediaAssetName || campaign.mediaContext?.assetName || campaign.mediaContext?.filename,
+        mediaPublicUrl: queueItem?.mediaPublicUrl || campaign.mediaContext?.publicUrl,
+        livePostUrl: queueItem?.livePostUrl,
+        postedAt: queueItem?.postedAt,
+        publishNotes: queueItem?.publishNotes,
+        isSandbox: queueItem?.isSandbox,
+        safetyStatus: queueItem?.safetyCheck?.status || post.safetyCheck?.status,
         readinessScore: post.score,
         metrics: queueItem?.metrics,
         createdAt: queueItem?.createdAt || campaign.createdAt,
@@ -4952,6 +5405,13 @@ function buildContentLibraryItems(
         intent: post.intent,
         status: queueItem?.status ?? "approved",
         mediaUsed: Boolean(queueItem?.mediaUsed || post.mediaUsed),
+        mediaAssetName: queueItem?.mediaAssetName,
+        mediaPublicUrl: queueItem?.mediaPublicUrl,
+        livePostUrl: queueItem?.livePostUrl,
+        postedAt: queueItem?.postedAt,
+        publishNotes: queueItem?.publishNotes,
+        isSandbox: queueItem?.isSandbox,
+        safetyStatus: queueItem?.safetyCheck?.status || post.supportingFields?.safetyCheck?.status,
         readinessScore: undefined,
         metrics: queueItem?.metrics,
         createdAt: queueItem?.createdAt || post.createdAt,
@@ -4977,6 +5437,13 @@ function buildContentLibraryItems(
         intent: item.intent,
         status: item.status,
         mediaUsed: item.mediaUsed,
+        mediaAssetName: item.mediaAssetName,
+        mediaPublicUrl: item.mediaPublicUrl,
+        livePostUrl: item.livePostUrl,
+        postedAt: item.postedAt,
+        publishNotes: item.publishNotes,
+        isSandbox: item.isSandbox,
+        safetyStatus: item.safetyCheck?.status,
         readinessScore: undefined,
         metrics: item.metrics,
         createdAt: item.createdAt,
@@ -4993,6 +5460,47 @@ function contentStatusLabel(status: ContentLibraryItem["status"]) {
   if (status === "approved") return "Approved";
   if (status === "rejected") return "Rejected";
   return status;
+}
+
+function contentEngagementTotal(item: ContentLibraryItem) {
+  const metrics = item.metrics ?? {};
+  return (
+    metricNumber(metrics.likes) +
+    metricNumber(metrics.comments) +
+    metricNumber(metrics.shares) +
+    metricNumber(metrics.saves) +
+    metricNumber(metrics.clicks)
+  );
+}
+
+function contentImpressions(item: ContentLibraryItem) {
+  return metricNumber(item.metrics?.impressions);
+}
+
+function contentEngagementRate(item: ContentLibraryItem) {
+  const impressions = contentImpressions(item);
+  if (!impressions) return "0%";
+  return `${((contentEngagementTotal(item) / impressions) * 100).toFixed(1)}%`;
+}
+
+function sortContentItems(a: ContentLibraryItem, b: ContentLibraryItem, sortMode: string) {
+  if (sortMode === "Oldest first") {
+    return new Date(a.postedAt || a.createdAt).getTime() - new Date(b.postedAt || b.createdAt).getTime();
+  }
+
+  if (sortMode === "Highest engagement") {
+    return contentEngagementTotal(b) - contentEngagementTotal(a);
+  }
+
+  if (sortMode === "Highest impressions") {
+    return contentImpressions(b) - contentImpressions(a);
+  }
+
+  if (sortMode === "Highest readiness score") {
+    return (b.readinessScore ?? 0) - (a.readinessScore ?? 0);
+  }
+
+  return new Date(b.postedAt || b.createdAt).getTime() - new Date(a.postedAt || a.createdAt).getTime();
 }
 
 function engagementRate(item?: PostQueueItem) {
@@ -5051,6 +5559,27 @@ function queueAnalytics(queue: PostQueueItem[]) {
     bestPlatform: best && best.engagement > 0 ? best.platform : "Not enough data",
     topPosts: [...posted].sort((a, b) => engagementTotal(b) - engagementTotal(a)).slice(0, 3)
   };
+}
+
+function isCampaignComplete(campaign: Campaign | undefined, queue: PostQueueItem[]) {
+  if (!campaign || campaign.posts.length === 0) return false;
+
+  const campaignPlatforms = campaign.platforms.length > 0
+    ? campaign.platforms
+    : Array.from(new Set(campaign.posts.map((post) => post.platform)));
+
+  return campaignPlatforms.every((platform) => {
+    const platformPosts = campaign.posts.filter((post) => post.platform === platform);
+    const completedQueueItem = queue.find((item) => {
+      const queueStatus = normalizeQueueStatus(item.status);
+      return (
+        item.campaignId === campaign.id &&
+        item.platform === platform &&
+        (queueStatus === "Posted" || queueStatus === "Archived")
+      );
+    });
+    return Boolean(completedQueueItem) || platformPosts.every((post) => post.status === "rejected");
+  });
 }
 
 const emptyProfileForm = {
@@ -7610,7 +8139,7 @@ function MediaAssetCard({
             Create post
           </Button>
           <Button size="sm" variant="secondary" onClick={onUse}>
-            Use in campaign
+            Use in brief
           </Button>
           <Button size="sm" variant="secondary" onClick={onViewDetails}>
             View details
@@ -7763,7 +8292,7 @@ function MediaAssetDetailsPanel({
               <AnalysisBlock label="Notes" value={asset.notes || "No notes yet."} />
               <div className="flex flex-wrap gap-2">
                 <Button onClick={onUse}>Create post from this</Button>
-                <Button variant="secondary" onClick={onUse}>Use in campaign</Button>
+                <Button variant="secondary" onClick={onUse}>Use in brief</Button>
               </div>
             </div>
           )}
@@ -7808,7 +8337,7 @@ function MediaAssetDetailsPanel({
                 <div className="mt-3 grid gap-2">
                   {campaignsUsingAsset.length === 0 ? (
                     <p className="rounded-md border border-dashed border-border bg-muted p-4 text-sm text-muted-foreground">
-                      No campaigns are tracked with this media yet. Use this asset in Create Post to start tracking usage.
+                      No briefs are tracked with this media yet. Use this asset in Create Post to start tracking usage.
                     </p>
                   ) : (
                     campaignsUsingAsset.map((campaign) => (
@@ -8238,7 +8767,7 @@ function VoiceSources({
           <Card className="p-8 text-center">
             <p className="font-semibold">No voice sources yet.</p>
             <p className="mt-2 text-sm text-muted-foreground">
-              Add one to make campaign generation feel more specific.
+              Add one to make post generation feel more specific.
             </p>
           </Card>
         ) : (
@@ -8482,7 +9011,7 @@ function BrandRules({
         <Sparkles className="text-primary" size={24} />
         <h3 className="mt-4 text-lg font-bold">Mock confidence</h3>
         <p className="mt-2 text-sm text-muted-foreground">
-          Based on pasted examples, this profile is ready for mock campaign generation.
+          Based on pasted examples, this profile is ready for mock generation.
         </p>
         <div className="mt-5 h-3 overflow-hidden rounded-full bg-muted">
           <div
@@ -8654,7 +9183,7 @@ function RepurposeCampaign({
 
       <div className="grid gap-5">
         <div>
-          <FieldLabel label="Source post or campaign" htmlFor="repurpose-source" />
+          <FieldLabel label="Source post or brief" htmlFor="repurpose-source" />
           <select
             id="repurpose-source"
             value={sourceValue}
@@ -8664,7 +9193,7 @@ function RepurposeCampaign({
             <option value="">Choose a source</option>
             {campaigns.map((campaign) => (
               <option key={`campaign-${campaign.id}`} value={`campaign:${campaign.id}`}>
-                Campaign: {campaign.name}
+                Brief: {campaign.name}
               </option>
             ))}
             {campaigns.flatMap((campaign) =>
@@ -8928,7 +9457,8 @@ function NewCampaign({
   isGenerating,
   handleGenerate,
   handleMockFallback,
-  createDefaultConduitProfile
+  createDefaultConduitProfile,
+  campaignComplete
 }: {
   campaignName: string;
   setCampaignName: (value: string) => void;
@@ -8972,6 +9502,7 @@ function NewCampaign({
   handleGenerate: () => void;
   handleMockFallback: () => void;
   createDefaultConduitProfile: () => void;
+  campaignComplete: boolean;
 }) {
   const selectedProfile = profiles.find((profile) => profile.id === selectedProfileId);
   const selectedTemplate = campaignTemplateConfigs[campaignTemplate];
@@ -9096,6 +9627,14 @@ function NewCampaign({
   return (
     <Card className="p-5">
       <div className="grid gap-5">
+        {campaignComplete && (
+          <div className="rounded-md border border-teal-200 bg-teal-50 p-4 text-sm leading-6 text-teal-900">
+            <p className="font-bold">Brief complete.</p>
+            <p className="mt-1">
+              This form is ready for the next post. Your previous brief remains saved in Content Library and Analytics.
+            </p>
+          </div>
+        )}
         <div className="flex flex-col justify-between gap-3 rounded-md border border-border bg-white p-4 sm:flex-row sm:items-center">
           <div>
             <p className="font-bold">Create Post</p>
@@ -9245,7 +9784,7 @@ function NewCampaign({
         {isAdvanced && <div className="rounded-md border border-primary/20 bg-teal-50 p-4">
           <div className="flex flex-col justify-between gap-3 md:flex-row md:items-start">
             <div className="min-w-0 flex-1">
-              <FieldLabel label="Campaign template" htmlFor="campaign-template" />
+              <FieldLabel label="Content template" htmlFor="campaign-template" />
               <p className="mt-1 text-sm leading-6 text-muted-foreground">
                 Start from a repeatable brief structure, then fill in your own specific intent and details.
               </p>
@@ -9445,7 +9984,7 @@ function NewCampaign({
 
         {isAdvanced && <div>
           <label className="text-sm font-semibold text-muted-foreground" htmlFor="campaign-name">
-            Campaign name
+            Brief title
           </label>
           <input
             id="campaign-name"
@@ -9526,7 +10065,7 @@ function NewCampaign({
                 Upload a photo, screenshot, video, or audio file. Images can be analyzed by AI now. Video/audio transcription can be added later.
               </p>
               {isAdvanced && <p className="mt-1 text-sm leading-6 text-muted-foreground">
-                Media preview uses a temporary object URL and is not persisted after refresh yet. Filename, type, notes, and analysis save with the campaign.
+                Media preview uses a temporary object URL and is not persisted after refresh yet. Filename, type, notes, and analysis save with the brief.
               </p>}
             </div>
             {(mediaContext.filename || mediaContext.notes) && (
@@ -9944,15 +10483,16 @@ const improveActions = [
   { label: "Make shorter", instruction: "Make this shorter and tighter while preserving the core idea." },
   { label: "Add CTA", instruction: "Add a clear, natural CTA that fits the platform." },
   { label: "Add alt text", instruction: "Add useful alt text or media accessibility guidance." },
-  { label: "Make less generic", instruction: "Make this less generic by adding concrete details from the campaign brief." },
-  { label: "Improve media fit", instruction: "Connect the post more clearly to the uploaded media or media notes." }
+  { label: "Make less generic", instruction: "Make this less generic by adding concrete details from the content brief." },
+  { label: "Improve media fit", instruction: "Connect the post more clearly to the uploaded media or media notes." },
+  { label: "Make it more Conduit", instruction: "Rewrite this to be more Conduit: specific, grounded in factory automation and real operations, less hypey, more direct, and closer to the selected brief and media context." }
 ];
 
 const brandSafetyQuickActions = [
   { label: "Make safer", instruction: "Make this safer by removing unsupported claims, confidential details, and sensitive operational specifics." },
-  { label: "Remove unsupported claim", instruction: "Remove unsupported claims and keep only what is grounded in the campaign brief or Company Knowledge." },
+  { label: "Remove unsupported claim", instruction: "Remove unsupported claims and keep only what is grounded in the content brief or Company Knowledge." },
   { label: "Make less hypey", instruction: "Make this less hypey, more precise, and less promotional." },
-  { label: "Make more specific", instruction: "Make this more specific using only the current campaign brief, media notes, and Company Knowledge." }
+  { label: "Make more specific", instruction: "Make this more specific using only the current content brief, media notes, and Company Knowledge." }
 ];
 
 const unsupportedClaimPatterns = [
@@ -9960,6 +10500,7 @@ const unsupportedClaimPatterns = [
   /\bproven\b/i,
   /\bonly\b/i,
   /\bbest\b/i,
+  /\beliminates?\b/i,
   /\bworld[- ]?class\b/i,
   /\bindustry[- ]?leading\b/i,
   /\bfirst\b/i,
@@ -9972,10 +10513,18 @@ const unsupportedClaimPatterns = [
 const genericAiPatterns = [
   /\bin today's (?:fast-paced|ever-changing|rapidly evolving)\b/i,
   /\bunlocks? (?:the )?power\b/i,
+  /\bunlock(?:s|ed|ing)?\b/i,
+  /\belevat(?:e|es|ed|ing)\b/i,
+  /\bempower(?:s|ed|ing)?\b/i,
+  /\bsupercharge(?:s|d|ing)?\b/i,
+  /\bnext[- ]gen\b/i,
+  /\bcutting[- ]edge\b/i,
   /\bgame[- ]changing\b/i,
-  /\brevolutionary\b/i,
+  /\brevolution(?:ary|ize|izes|ized|izing)\b/i,
   /\bseamless(?:ly)?\b/i,
   /\btransform(?:ing|s)? the way\b/i,
+  /\binnovation for innovation(?:'s)? sake\b/i,
+  /\bgeneric “?future of work”? language\b/i,
   /\btake (?:it|things|your \w+) to the next level\b/i,
   /\bwhere .* meets .*\b/i
 ];
@@ -10024,7 +10573,7 @@ function runFallbackBrandSafetyCheck(
   }
 
   if (genericAiPatterns.some((pattern) => pattern.test(normalizedCopy))) {
-    notes.add("Tone sounds generic");
+    notes.add("Tone sounds generic or over-polished");
   }
 
   if (overhypedPatterns.some((pattern) => pattern.test(normalizedCopy))) {
@@ -10077,7 +10626,7 @@ function safetyStatusClass(status: BrandSafetyCheck["status"]) {
 }
 
 function applyBrandSafetyQuickFix(copy: string, instruction: string) {
-  let nextCopy = copy
+  let nextCopy = sanitizeConduitCopy(copy)
     .replace(/\b(game[- ]changing|revolutionary|industry[- ]leading|world[- ]class|massive|unstoppable)\b/gi, "meaningful")
     .replace(/\bguaranteed?\b/gi, "intended")
     .replace(/\balways\b/gi, "often")
@@ -10092,6 +10641,13 @@ function applyBrandSafetyQuickFix(copy: string, instruction: string) {
     nextCopy = `Conduit: ${nextCopy}`;
   }
 
+  if (/more conduit/i.test(instruction)) {
+    nextCopy = nextCopy
+      .replace(/\bsolution\b/gi, "system")
+      .replace(/\busers\b/gi, "operators")
+      .replace(/\bworkflow\b/gi, "operation");
+  }
+
   return nextCopy.replace(/[ \t]{2,}/g, " ").replace(/\n{3,}/g, "\n\n").trim();
 }
 
@@ -10102,6 +10658,10 @@ function postReadiness(post: GeneratedPost, campaign?: Campaign) {
   const firstLine = copy.split("\n").find(Boolean) ?? "";
   const hasMedia = Boolean(post.mediaUsed || campaign?.mediaContext?.filename || campaign?.mediaContext?.notes);
   const hasCta = Boolean(post.cta || /\b(follow|learn|read|watch|save|comment|dm|tell us|join|apply|reach out)\b/i.test(copy));
+  const hasGenericLanguage = genericAiPatterns.some((pattern) => pattern.test(copy));
+  const hasUnsupportedClaim = unsupportedClaimPatterns.some((pattern) => pattern.test(copy)) && safety.status !== "Safe";
+  const hasOperationalSpecificity = /\b(factory|robot|machine|sensor|operator|workcell|cell|plc|hardware|deployment|line|floor|whiteboard|integration|handoff|automation|manufacturing|industrial)\b/i.test(copy);
+  const vagueHook = /^(excited to share|big news|we're thrilled|introducing|here('| i)s|in today)/i.test(firstLine) || firstLine.length < 18;
   const hasAltText = !hasMedia || Boolean(post.altText);
   const hasHashtagsOrFormat =
     post.platform === "Instagram" || post.platform === "TikTok"
@@ -10124,7 +10684,7 @@ function postReadiness(post: GeneratedPost, campaign?: Campaign) {
   const items: ReadinessItem[] = [
     {
       label: "Hook strength",
-      passed: firstLine.length >= 18 && firstLine.length <= 140 && !/^here('| i)s/i.test(firstLine),
+      passed: firstLine.length >= 18 && firstLine.length <= 140 && !vagueHook,
       suggestion: "Open with a sharper, more specific first line."
     },
     {
@@ -10139,8 +10699,8 @@ function postReadiness(post: GeneratedPost, campaign?: Campaign) {
     },
     {
       label: "Brand voice fit",
-      passed: !/\b(leverage|synergy|game-changing|revolutionary|seamless solution)\b/i.test(copy),
-      suggestion: "Remove generic or over-polished language."
+      passed: !hasGenericLanguage && hasOperationalSpecificity,
+      suggestion: "Remove generic language and add real operational detail."
     },
     {
       label: "Media fit",
@@ -10173,7 +10733,18 @@ function postReadiness(post: GeneratedPost, campaign?: Campaign) {
       suggestion: "Check unsupported claims or sensitive details."
     }
   ];
-  const score = Math.round((items.filter((item) => item.passed).length / items.length) * 100);
+  const baseScore = Math.round((items.filter((item) => item.passed).length / items.length) * 100);
+  const penalty =
+    (hasGenericLanguage ? 12 : 0) +
+    (vagueHook ? 10 : 0) +
+    (hasUnsupportedClaim ? 12 : 0) +
+    (!hasOperationalSpecificity ? 8 : 0) +
+    (hasMedia && !post.recommendedMediaUse && !campaign?.mediaContext?.notes ? 6 : 0);
+  const bonus =
+    (hasOperationalSpecificity ? 6 : 0) +
+    (hasMedia && Boolean(post.recommendedMediaUse || campaign?.mediaContext?.notes) ? 5 : 0) +
+    (!hasGenericLanguage && safety.status === "Safe" ? 4 : 0);
+  const score = Math.max(0, Math.min(100, baseScore - penalty + bonus));
   const suggestions = items
     .filter((item) => !item.passed)
     .map((item) => item.suggestion)
@@ -10189,13 +10760,16 @@ function postReadiness(post: GeneratedPost, campaign?: Campaign) {
 function PostReadinessPanel({
   post,
   campaign,
-  onImprove
+  onImprove,
+  compact = false
 }: {
   post: GeneratedPost;
   campaign?: Campaign;
   onImprove?: (instruction: string) => void;
+  compact?: boolean;
 }) {
   const readiness = postReadiness(post, campaign);
+  const [showFullScore, setShowFullScore] = useState(!compact);
   const barClass =
     readiness.score >= 85
       ? "bg-primary"
@@ -10224,30 +10798,41 @@ function PostReadinessPanel({
       <div className="mt-3 h-2 overflow-hidden rounded-full bg-muted">
         <div className={cn("h-full rounded-full", barClass)} style={{ width: `${readiness.score}%` }} />
       </div>
-      <div className="mt-4 grid gap-2 md:grid-cols-2">
-        {readiness.items.map((item) => (
-          <div key={item.label} className="flex gap-2 rounded-md bg-slate-50 p-2 text-sm">
-            <span className={cn(
-              "mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-[10px] font-bold",
-              item.passed ? "bg-teal-100 text-primary" : "bg-amber-100 text-amber-800"
-            )}>
-              {item.passed ? "OK" : "!"}
-            </span>
-            <span>
-              <span className="font-semibold">{item.label}</span>
-              {!item.passed && <span className="block text-muted-foreground">{item.suggestion}</span>}
-            </span>
-          </div>
-        ))}
-      </div>
       {readiness.suggestions.length > 0 && (
-        <div className="mt-4 rounded-md bg-slate-50 p-3">
-          <p className="text-xs font-bold uppercase text-muted-foreground">Improvement suggestions</p>
+        <div className="mt-3 rounded-md bg-slate-50 p-3">
+          <p className="text-xs font-bold uppercase text-muted-foreground">Top suggestions</p>
           <ul className="mt-2 space-y-1 text-sm leading-6 text-muted-foreground">
-            {readiness.suggestions.map((suggestion) => (
+            {readiness.suggestions.slice(0, compact ? 2 : 4).map((suggestion) => (
               <li key={suggestion}>{suggestion}</li>
             ))}
           </ul>
+        </div>
+      )}
+      {compact && (
+        <button
+          type="button"
+          onClick={() => setShowFullScore((current) => !current)}
+          className="mt-3 text-sm font-bold text-primary"
+        >
+          {showFullScore ? "Hide full score" : "View full score"}
+        </button>
+      )}
+      {showFullScore && (
+        <div className="mt-4 grid gap-2 md:grid-cols-2">
+          {readiness.items.map((item) => (
+            <div key={item.label} className="flex gap-2 rounded-md bg-slate-50 p-2 text-sm">
+              <span className={cn(
+                "mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-[10px] font-bold",
+                item.passed ? "bg-teal-100 text-primary" : "bg-amber-100 text-amber-800"
+              )}>
+                {item.passed ? "OK" : "!"}
+              </span>
+              <span>
+                <span className="font-semibold">{item.label}</span>
+                {!item.passed && <span className="block text-muted-foreground">{item.suggestion}</span>}
+              </span>
+            </div>
+          ))}
         </div>
       )}
       {onImprove && (
@@ -10690,7 +11275,11 @@ function PostQueue({
   setScreen,
   mediaPreviewUrl,
   queueDebugMessage,
-  storageMode
+  storageMode,
+  activeCampaign,
+  activeCampaignComplete,
+  startNewPost,
+  repurposeCampaign
 }: {
   queue: PostQueueItem[];
   campaigns: Campaign[];
@@ -10700,6 +11289,10 @@ function PostQueue({
   mediaPreviewUrl: string;
   queueDebugMessage: string;
   storageMode: StorageMode;
+  activeCampaign?: Campaign;
+  activeCampaignComplete: boolean;
+  startNewPost: () => void;
+  repurposeCampaign: (campaign: Campaign) => void;
 }) {
   const [platformFilter, setPlatformFilter] = useState<Platform | "All">("All");
   const [profileFilter, setProfileFilter] = useState("All");
@@ -10722,10 +11315,10 @@ function PostQueue({
     profileFilter !== "All" ||
     statusFilter !== "All" ||
     campaignFilter !== "All";
-  const platformSections = platforms
-    .map((platform) => ({
-      platform,
-      items: filteredQueue.filter((item) => item.platform === platform)
+  const statusSections = queueStatuses
+    .map((status) => ({
+      status,
+      items: filteredQueue.filter((item) => normalizeQueueStatus(item.status) === status)
     }))
     .filter((section) => section.items.length > 0);
 
@@ -10783,13 +11376,13 @@ function PostQueue({
               ))}
             </select>
           </QueueFilter>
-          <QueueFilter label="Campaign">
+          <QueueFilter label="Brief">
             <select
               value={campaignFilter}
               onChange={(event) => setCampaignFilter(event.target.value)}
               className="mt-2 h-10 w-full rounded-md border border-input bg-white px-3 text-sm outline-none focus:ring-2 focus:ring-ring"
             >
-              <option value="All">All campaigns</option>
+              <option value="All">All briefs</option>
               {campaigns.map((campaign) => (
                 <option key={campaign.id} value={campaign.id}>{campaign.name}</option>
               ))}
@@ -10820,6 +11413,27 @@ function PostQueue({
         </div>
       </Card>
 
+      {activeCampaignComplete && activeCampaign && (
+        <Card className="border-teal-200 bg-teal-50 p-5">
+          <div className="flex flex-col justify-between gap-3 lg:flex-row lg:items-center">
+            <div>
+              <p className="font-bold text-teal-900">Brief complete. Create a new post or repurpose this content.</p>
+              <p className="mt-1 text-sm leading-6 text-teal-900">
+                Posted and archived items stay saved in Analytics and Content Library.
+              </p>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              <Button onClick={startNewPost}>Create next post</Button>
+              <Button variant="secondary" onClick={() => repurposeCampaign(activeCampaign)}>
+                <Repeat2 size={16} /> Repurpose this brief
+              </Button>
+              <Button variant="secondary" onClick={() => setScreen("Analytics")}>View Analytics</Button>
+              <Button variant="secondary" onClick={() => setScreen("Content Library")}>View Content Library</Button>
+            </div>
+          </div>
+        </Card>
+      )}
+
       {queue.length === 0 ? (
         <Card className="p-8 text-center">
             <p className="font-semibold">No Ready to Post items yet.</p>
@@ -10840,13 +11454,17 @@ function PostQueue({
           </p>
         </Card>
       ) : (
-        platformSections.map((section) => (
-          <Card key={section.platform} className="p-5">
+        statusSections.map((section) => (
+          <Card key={section.status} className="p-5">
             <div className="mb-4 flex items-center justify-between gap-3">
               <div>
-                <h3 className="text-lg font-bold">{section.platform}</h3>
+                <h3 className="text-lg font-bold">{section.status}</h3>
                 <p className="mt-1 text-sm text-muted-foreground">
-                  Queued {section.platform} posts only.
+                  {section.status === "Ready"
+                    ? "Posts ready to publish manually."
+                    : section.status === "Posted"
+                      ? "Published posts stay here for URL and metrics tracking."
+                      : `${section.status} posts.`}
                 </p>
               </div>
               <Pill>{section.items.length}</Pill>
@@ -10873,12 +11491,14 @@ function BrandSafetyPanel({
   post,
   campaign,
   onAction,
-  onUpdateCheck
+  onUpdateCheck,
+  compact = false
 }: {
   post: GeneratedPost;
   campaign?: Campaign;
   onAction?: (instruction: string) => void;
   onUpdateCheck?: (check: BrandSafetyCheck) => void;
+  compact?: boolean;
 }) {
   const fallbackCheck = useMemo(
     () => safetyCheckForPost(post, campaign),
@@ -10887,6 +11507,7 @@ function BrandSafetyPanel({
   const [check, setCheck] = useState<BrandSafetyCheck>(fallbackCheck);
   const [isChecking, setIsChecking] = useState(false);
   const [hasRequestedAi, setHasRequestedAi] = useState(false);
+  const [showSafetyDetails, setShowSafetyDetails] = useState(!compact);
 
   useEffect(() => {
     setCheck(fallbackCheck);
@@ -10949,23 +11570,39 @@ function BrandSafetyPanel({
           {isChecking ? "Checking..." : check.status}
         </span>
       </div>
-      <div className="mt-3 grid gap-2">
-        {check.notes.map((note) => (
-          <div key={note} className="flex gap-2 rounded-md bg-slate-50 p-2 text-sm">
-            <span className={cn(
-              "mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-[10px] font-bold",
-              check.status === "Safe" ? "bg-teal-100 text-primary" : check.status === "Needs review" ? "bg-amber-100 text-amber-800" : "bg-red-100 text-red-700"
-            )}>
-              {check.status === "Safe" ? "OK" : "!"}
-            </span>
-            <span>{note}</span>
-          </div>
-        ))}
+      <div className="mt-3 rounded-md bg-slate-50 p-3 text-sm">
+        <span className="font-semibold">{check.notes[0] ?? "No obvious safety issues."}</span>
       </div>
-      <p className="mt-3 text-xs text-muted-foreground">
-        Source: {check.source === "AI" ? "AI assisted" : "deterministic fallback"} · Last checked {formatShortDateTime(check.checkedAt)}
-      </p>
-      {onAction && (
+      {compact && (
+        <button
+          type="button"
+          onClick={() => setShowSafetyDetails((current) => !current)}
+          className="mt-3 text-sm font-bold text-primary"
+        >
+          {showSafetyDetails ? "Hide safety details" : "View safety details"}
+        </button>
+      )}
+      {showSafetyDetails && (
+        <>
+          <div className="mt-3 grid gap-2">
+            {check.notes.map((note) => (
+              <div key={note} className="flex gap-2 rounded-md bg-slate-50 p-2 text-sm">
+                <span className={cn(
+                  "mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-[10px] font-bold",
+                  check.status === "Safe" ? "bg-teal-100 text-primary" : check.status === "Needs review" ? "bg-amber-100 text-amber-800" : "bg-red-100 text-red-700"
+                )}>
+                  {check.status === "Safe" ? "OK" : "!"}
+                </span>
+                <span>{note}</span>
+              </div>
+            ))}
+          </div>
+          <p className="mt-3 text-xs text-muted-foreground">
+            Source: {check.source === "AI" ? "AI assisted" : "deterministic fallback"} · Last checked {formatShortDateTime(check.checkedAt)}
+          </p>
+        </>
+      )}
+      {onAction && showSafetyDetails && (
         <div className="mt-4">
           <p className="text-xs font-bold uppercase text-muted-foreground">Quick actions</p>
           <div className="mt-2 flex flex-wrap gap-2">
@@ -11018,7 +11655,8 @@ function PostQueueCard({
   const [publishForm, setPublishForm] = useState({
     livePostUrl: item.livePostUrl ?? "",
     postedAt: toDateTimeLocalValue(item.postedAt),
-    publishNotes: item.publishNotes ?? ""
+    publishNotes: item.publishNotes ?? "",
+    isSandbox: Boolean(item.isSandbox)
   });
   const [metricsForm, setMetricsForm] = useState({
     impressions: String(item.metrics?.impressions ?? ""),
@@ -11033,7 +11671,8 @@ function PostQueueCard({
     setPublishForm({
       livePostUrl: item.livePostUrl ?? "",
       postedAt: toDateTimeLocalValue(item.postedAt),
-      publishNotes: item.publishNotes ?? ""
+      publishNotes: item.publishNotes ?? "",
+      isSandbox: Boolean(item.isSandbox)
     });
     setMetricsForm({
       impressions: String(item.metrics?.impressions ?? ""),
@@ -11043,7 +11682,7 @@ function PostQueueCard({
       saves: String(item.metrics?.saves ?? ""),
       clicks: String(item.metrics?.clicks ?? "")
     });
-  }, [item.id, item.livePostUrl, item.postedAt, item.publishNotes, item.metrics]);
+  }, [item.id, item.livePostUrl, item.postedAt, item.publishNotes, item.isSandbox, item.metrics]);
 
   const previewCampaign: Campaign =
     campaign ?? {
@@ -11105,6 +11744,28 @@ function PostQueueCard({
     window.setTimeout(() => setCopyState("idle"), 1400);
   }
 
+  function openPlatform() {
+    window.open(platformUrls[item.platform], "_blank", "noopener,noreferrer");
+  }
+
+  function downloadMedia() {
+    const mediaUrl = item.mediaPublicUrl || mediaPreviewUrl;
+    if (!item.mediaUsed || !mediaUrl) {
+      setPublishSaved("Media preview unavailable. Re-upload or select from Media Library.");
+      window.setTimeout(() => setPublishSaved(""), 2200);
+      return;
+    }
+
+    const link = document.createElement("a");
+    link.href = mediaUrl;
+    link.download = item.mediaAssetName || `${item.platform.toLowerCase()}-media`;
+    link.target = "_blank";
+    link.rel = "noopener noreferrer";
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+  }
+
   function numberFromInput(value: string) {
     const trimmed = value.trim();
     if (!trimmed) return undefined;
@@ -11117,6 +11778,7 @@ function PostQueueCard({
       livePostUrl: publishForm.livePostUrl.trim(),
       postedAt: publishForm.postedAt ? new Date(publishForm.postedAt).toISOString() : "",
       publishNotes: publishForm.publishNotes.trim(),
+      isSandbox: publishForm.isSandbox,
       status: "Posted"
     });
     setPublishSaved("Publishing details saved");
@@ -11132,7 +11794,9 @@ function PostQueueCard({
         shares: numberFromInput(metricsForm.shares),
         saves: numberFromInput(metricsForm.saves),
         clicks: numberFromInput(metricsForm.clicks)
-      }
+      },
+      publishNotes: publishForm.publishNotes.trim(),
+      isSandbox: publishForm.isSandbox
     });
     setPublishSaved("Metrics saved");
     window.setTimeout(() => setPublishSaved(""), 1400);
@@ -11147,6 +11811,7 @@ function PostQueueCard({
             <Pill>{item.profileName || "No profile"}</Pill>
             {item.mediaUsed && <Pill>Media: {item.mediaAssetName || campaign?.mediaContext?.assetName || campaign?.mediaContext?.filename || "used"}</Pill>}
             {item.contentAngle && <Pill>{item.contentAngle}</Pill>}
+            {item.isSandbox && <Pill>Sandbox/test post</Pill>}
           </div>
           <h4 className="mt-3 text-base font-extrabold">{item.campaignName}</h4>
           {item.intent && (
@@ -11175,13 +11840,59 @@ function PostQueueCard({
             {showPreview ? "Hide preview" : "Preview"}
           </Button>
           <Button size="sm" variant="secondary" onClick={handleCopy}>
-            <Clipboard size={14} /> {copyState === "copied" ? "Copied" : copyState === "failed" ? "Copy failed" : "Copy"}
+            <Clipboard size={14} /> {copyState === "copied" ? "Copied" : copyState === "failed" ? "Copy failed" : item.platform === "LinkedIn" || item.platform === "X" ? "Copy post" : "Copy caption"}
+          </Button>
+          {item.mediaUsed && (
+            <Button size="sm" variant="secondary" onClick={downloadMedia}>
+              <Download size={14} /> Download media
+            </Button>
+          )}
+          <Button size="sm" variant="secondary" onClick={openPlatform}>
+            <ExternalLink size={14} /> Open {item.platform}
           </Button>
         </div>
       </div>
 
       <div className="mt-4 rounded-lg border border-slate-200 bg-slate-50 p-4">
         <p className="whitespace-pre-wrap text-sm leading-6">{displayContent}</p>
+      </div>
+
+      <div className="mt-4 rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
+        <div className="flex flex-col justify-between gap-2 sm:flex-row sm:items-center">
+          <div>
+            <p className="text-xs font-extrabold uppercase tracking-wide text-muted-foreground">Manual posting checklist</p>
+            <p className="mt-1 text-sm text-muted-foreground">Use this before marking the post as Posted.</p>
+          </div>
+          <Pill>{item.platform}</Pill>
+        </div>
+        <div className="mt-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
+          {manualPostingSteps[item.platform].map((step, index) => (
+            <div key={step} className="flex items-center gap-2 rounded-md bg-slate-50 p-2 text-sm">
+              <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-teal-100 text-[10px] font-extrabold text-primary">
+                {index + 1}
+              </span>
+              <span className="font-semibold">{step}</span>
+            </div>
+          ))}
+        </div>
+        {item.mediaUsed && !item.mediaPublicUrl && !mediaPreviewUrl && (
+          <p className="mt-3 rounded-md bg-amber-50 p-3 text-sm font-semibold text-amber-800">
+            Media preview unavailable. Re-upload or select from Media Library.
+          </p>
+        )}
+        <div className="mt-4 flex flex-wrap gap-2">
+          <Button size="sm" variant="secondary" onClick={handleCopy}>
+            <Clipboard size={14} /> {item.platform === "LinkedIn" || item.platform === "X" ? "Copy post" : "Copy caption"}
+          </Button>
+          {item.mediaUsed && (
+            <Button size="sm" variant="secondary" onClick={downloadMedia}>
+              <Download size={14} /> Download media
+            </Button>
+          )}
+          <Button size="sm" variant="secondary" onClick={openPlatform}>
+            <ExternalLink size={14} /> Open {item.platform}
+          </Button>
+        </div>
       </div>
 
       <div className="mt-4">
@@ -11250,7 +11961,10 @@ function PostQueueCard({
               }));
               updateQueueItem(item.id, {
                 status: "Posted",
-                postedAt: item.postedAt || now
+                postedAt: item.postedAt || now,
+                isSandbox: publishForm.isSandbox,
+                livePostUrl: publishForm.livePostUrl.trim(),
+                publishNotes: publishForm.publishNotes.trim()
               });
             }}
           >
@@ -11277,6 +11991,18 @@ function PostQueueCard({
             </div>
             {publishSaved && <span className="text-sm font-semibold text-primary">{publishSaved}</span>}
           </div>
+          <label className="flex items-center gap-2 rounded-md border border-teal-200 bg-white p-3 text-sm font-semibold text-teal-900">
+            <input
+              type="checkbox"
+              checked={publishForm.isSandbox}
+              onChange={(event) => {
+                const isSandbox = event.target.checked;
+                setPublishForm((current) => ({ ...current, isSandbox }));
+                updateQueueItem(item.id, { isSandbox });
+              }}
+            />
+            Sandbox/test post
+          </label>
           <div className="grid gap-3 md:grid-cols-3">
             <div className="md:col-span-2">
               <FieldLabel label="Live post URL" htmlFor={`live-url-${item.id}`} />
@@ -11386,6 +12112,7 @@ function normalizeQueueStatus(status?: string): QueueStatus {
 
 function ResultsEditor({
   campaign,
+  campaignComplete,
   rawIdeaIsGeneric,
   updatePost,
   approvePost,
@@ -11397,9 +12124,12 @@ function ResultsEditor({
   generationError,
   approveDebug,
   setScreen,
-  mediaPreviewUrl
+  mediaPreviewUrl,
+  startNewPost,
+  repurposeCampaign
 }: {
   campaign?: Campaign;
+  campaignComplete: boolean;
   rawIdeaIsGeneric: boolean;
   updatePost: (id: string, updates: Partial<GeneratedPost>) => void;
   approvePost: (post: GeneratedPost) => Promise<void>;
@@ -11416,10 +12146,13 @@ function ResultsEditor({
   };
   setScreen: (screen: Screen) => void;
   mediaPreviewUrl: string;
+  startNewPost: () => void;
+  repurposeCampaign: (campaign: Campaign) => void;
 }) {
   const [activePlatform, setActivePlatform] = useState<Platform>("LinkedIn");
   const [showMoreOptions, setShowMoreOptions] = useState(false);
   const [showDebugDetails, setShowDebugDetails] = useState(false);
+  const [showBriefContext, setShowBriefContext] = useState(false);
 
   useEffect(() => {
     if (campaign?.platforms.length && !campaign.platforms.includes(activePlatform)) {
@@ -11431,7 +12164,7 @@ function ResultsEditor({
   if (!campaign) {
     return (
       <Card className="p-8 text-center">
-        <p className="font-semibold">No campaign selected.</p>
+        <p className="font-semibold">No brief selected.</p>
         <Button className="mt-4" onClick={() => setScreen("New Campaign")}>
           Create a post
         </Button>
@@ -11447,22 +12180,27 @@ function ResultsEditor({
   const mediaAngle = campaign.mediaContext?.analysis?.angles?.[0];
   const overlayIdea = campaign.mediaContext?.analysis?.captionIdeas?.[0];
 
-  return (
-    <div className="space-y-4">
-      <Card className="p-5">
-        <div className="flex flex-col justify-between gap-3 md:flex-row md:items-center">
-          <div>
-            <h3 className="text-xl font-extrabold tracking-tight">{campaign.name}</h3>
-            <p className="mt-1 text-sm text-muted-foreground">
-              {campaign.intent || campaign.idea || "No brief summary saved."}
-            </p>
-          </div>
-          <Button variant="secondary" onClick={() => setScreen("New Campaign")}>
-            <Plus size={16} /> Create a post
+  if (campaignComplete) {
+    return (
+      <Card className="p-8 text-center">
+        <p className="text-xl font-extrabold tracking-tight">Brief complete.</p>
+        <p className="mx-auto mt-2 max-w-xl text-sm leading-6 text-muted-foreground">
+          This brief is complete. Start a new post, repurpose this content, or view the saved history.
+        </p>
+        <div className="mt-5 flex flex-wrap justify-center gap-2">
+          <Button onClick={startNewPost}>Create next post</Button>
+          <Button variant="secondary" onClick={() => repurposeCampaign(campaign)}>
+            <Repeat2 size={16} /> Repurpose this brief
           </Button>
+          <Button variant="secondary" onClick={() => setScreen("Analytics")}>View Analytics</Button>
+          <Button variant="secondary" onClick={() => setScreen("Content Library")}>View Content Library</Button>
         </div>
       </Card>
+    );
+  }
 
+  return (
+    <div className="space-y-4">
       {generationNotice && (
         <div className="rounded-md border border-teal-200 bg-teal-50 p-4 text-sm font-semibold text-teal-900">
           <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
@@ -11502,61 +12240,26 @@ function ResultsEditor({
       )}
 
       <Card className="p-5">
-        <h3 className="text-lg font-bold">What this campaign is about</h3>
-        <div className="mt-4 grid gap-3 md:grid-cols-2">
-          <AnalysisBlock
-            label="Template"
-            value={campaign.campaignTemplate || "No template saved."}
-          />
-          <AnalysisBlock
-            label="Intent"
-            value={campaign.intent || "No intent saved for this older campaign."}
-          />
-          <AnalysisBlock
-            label="Content angle"
-            value={campaign.contentAngle || "No content angle saved for this older campaign."}
-          />
-          <AnalysisBlock
-            label={rawIdeaIsGeneric ? "Details / raw notes (missing/generic)" : "Details / raw notes"}
-            value={
-              rawIdeaIsGeneric
-                ? "This campaign was created before input validation. New campaigns require a specific raw idea before generation."
-                : campaign.idea || "No details/raw notes added."
-            }
-          />
-          <AnalysisBlock
-            label="Media notes"
-            value={campaign.mediaContext?.notes || "No media notes added."}
-          />
-          <AnalysisBlock
-            label="What AI saw"
-            value={campaign.mediaContext?.analysis?.description || "No image analysis available."}
-          />
-          <AnalysisBlock
-            label="Main content angle"
-            value={mediaAngle || "Use the raw idea as the primary angle."}
-          />
-        </div>
-      </Card>
-
-      <Card className="p-5">
         <div className="flex flex-col justify-between gap-3 md:flex-row md:items-start">
           <div>
-            <h3 className="text-lg font-bold">Campaign Brief</h3>
+            <p className="text-xs font-extrabold uppercase tracking-wide text-primary">Brief context</p>
+            <h3 className="mt-1 text-xl font-extrabold tracking-tight">{campaign.name}</h3>
             <p className="mt-1 text-sm text-muted-foreground">
-              The creative context used for this set of generated variants.
+              {campaign.intent || campaign.idea || "No brief summary saved."}
             </p>
           </div>
-          <Pill>{campaign.generatedBy ?? "Mock"}</Pill>
-          <Pill>{campaign.campaignType ?? "Original"}</Pill>
+          <div className="flex flex-wrap gap-2">
+            <Button size="sm" variant="secondary" onClick={() => setShowBriefContext((current) => !current)}>
+              {showBriefContext ? "Hide details" : "View details"}
+            </Button>
+            <Button size="sm" variant="secondary" onClick={() => setScreen("New Campaign")}>
+              <Plus size={16} /> Create a post
+            </Button>
+          </div>
         </div>
-        <div className="mt-4 grid gap-3 md:grid-cols-2 lg:grid-cols-4">
+        <div className="mt-4 grid gap-3 md:grid-cols-2 lg:grid-cols-3">
           <BriefItem
-            label="Repurposed from"
-            value={campaign.repurposedFrom?.label ?? "Original campaign"}
-          />
-          <BriefItem
-            label="Posting Account"
+            label="Posting account"
             value={
               campaign.profileName
                 ? `${campaign.profileName} · ${campaign.profileType}`
@@ -11564,7 +12267,42 @@ function ResultsEditor({
             }
           />
           <BriefItem
-            label="Voice Influence"
+            label="Platforms"
+            value={availablePlatforms.join(", ")}
+          />
+          <BriefItem
+            label="Media used"
+            value={
+              campaign.mediaContext?.filename
+                ? campaign.mediaContext.assetName || campaign.mediaContext.filename
+                : "No media attached"
+            }
+          />
+          <BriefItem
+            label="Company Knowledge"
+            value={
+              (campaign.sourceLibraryNames ?? []).length > 0
+                ? (campaign.sourceLibraryNames ?? []).join(", ")
+                : "Using automatic Company Knowledge"
+            }
+          />
+          <BriefItem
+            label="Content angle"
+            value={campaign.contentAngle || "Not saved"}
+          />
+          <BriefItem
+            label="Generation"
+            value={`${campaign.generatedBy ?? "Mock"} · ${campaign.campaignType ?? "Original"}`}
+          />
+        </div>
+        {showBriefContext && (
+          <div className="mt-4 grid gap-3 border-t border-slate-200 pt-4 md:grid-cols-2 lg:grid-cols-4">
+            <BriefItem
+              label="Repurposed from"
+              value={campaign.repurposedFrom?.label ?? "Original brief"}
+            />
+            <BriefItem
+              label="Voice Influence"
             value={
               (campaign.voiceInfluenceNames ?? []).length > 0
                 ? (campaign.voiceInfluenceNames ?? []).join(", ")
@@ -11588,10 +12326,6 @@ function ResultsEditor({
             }
           />
           <BriefItem
-            label="Content angle"
-            value={campaign.contentAngle || "Not saved"}
-          />
-          <BriefItem
             label="Template"
             value={campaign.campaignTemplate || "No template saved"}
           />
@@ -11600,43 +12334,20 @@ function ResultsEditor({
             value={campaign.intent || "Not saved"}
           />
           <BriefItem
-            label="Media used"
-            value={
-              campaign.mediaContext?.filename
-                ? campaign.mediaContext.assetName || campaign.mediaContext.filename
-                : "No media attached"
-            }
-          />
-          <BriefItem
-            label="Company Knowledge"
-            value={
-              (campaign.sourceLibraryNames ?? []).length > 0
-                ? (campaign.sourceLibraryNames ?? []).join(", ")
-                : "No items selected"
-            }
-          />
-          <BriefItem
             label="Brand Voice Rules"
             value={`Global rules · ${campaign.generatedBy ?? "Mock"} generation`}
           />
-        </div>
-      </Card>
-
-      {campaign.mediaContext && (
-        <Card className="p-5">
-          <h3 className="text-lg font-bold">Media Context</h3>
-          <div className="mt-4 grid gap-3 md:grid-cols-2">
             <AnalysisBlock
               label="What the AI sees"
               value={
-                campaign.mediaContext.analysis?.description ||
-                campaign.mediaContext.notes ||
+                campaign.mediaContext?.analysis?.description ||
+                campaign.mediaContext?.notes ||
                 "Media was attached without additional notes."
               }
             />
             <AnalysisBlock
               label="Best content angle"
-              value={mediaAngle || "Use the media as proof for the campaign idea."}
+              value={mediaAngle || "Use the media as proof for the brief idea."}
             />
             <AnalysisBlock
               label="Suggested overlay text"
@@ -11644,19 +12355,19 @@ function ResultsEditor({
             />
             <AnalysisBlock
               label="Manual context"
-              value={campaign.mediaContext.notes || "No manual notes added."}
+              value={campaign.mediaContext?.notes || "No manual notes added."}
             />
+            {(campaign.mediaContext?.analysis?.warnings ?? []).length > 0 && (
+              <div className="rounded-md border border-amber-200 bg-amber-50 p-4 text-sm leading-6 text-amber-900 md:col-span-2">
+                <p className="font-bold">Media warnings</p>
+                <p className="mt-1">{(campaign.mediaContext?.analysis?.warnings ?? []).join(", ")}</p>
+              </div>
+            )}
           </div>
-          {(campaign.mediaContext.analysis?.warnings ?? []).length > 0 && (
-            <div className="mt-4 rounded-md border border-amber-200 bg-amber-50 p-4 text-sm leading-6 text-amber-900">
-              <p className="font-bold">Warnings</p>
-              <p className="mt-1">{(campaign.mediaContext.analysis?.warnings ?? []).join(", ")}</p>
-            </div>
-          )}
-        </Card>
-      )}
+        )}
+      </Card>
 
-      <Card className="p-4">
+      <Card className="sticky top-4 z-20 p-4">
         <div className="flex flex-wrap gap-2">
           {availablePlatforms.map((platform) => {
             const count = campaign.posts.filter((post) => post.platform === platform).length;
@@ -11761,6 +12472,7 @@ function PostEditor({
   const [regenerateInstruction, setRegenerateInstruction] = useState("");
   const [showPrevious, setShowPrevious] = useState(false);
   const [showWhy, setShowWhy] = useState(false);
+  const [showPackageDetails, setShowPackageDetails] = useState(false);
   const displayContent = userFacingPostContent(post.content, campaign, post);
   const details = supportingDetailsFromPost(post);
   const readiness = postReadiness(post, campaign);
@@ -11806,7 +12518,6 @@ function PostEditor({
       <div className="mb-4 flex flex-col justify-between gap-3 sm:flex-row sm:items-start">
         <div className="flex flex-wrap items-center gap-2">
           <Pill>{post.platform}</Pill>
-          <Pill>{post.generatedBy ?? "Mock"}</Pill>
           <Pill>
             {post.profileName
               ? `${post.profileName} · ${post.profileType}`
@@ -11817,9 +12528,6 @@ function PostEditor({
               Media: {campaign.mediaContext?.assetName || campaign.mediaContext?.filename || "used"}
             </Pill>
           )}
-          {(post.sourceLibraryNames ?? []).map((sourceName) => (
-            <Pill key={sourceName}>{sourceName}</Pill>
-          ))}
           <span className={cn("rounded-md px-2.5 py-1 text-xs font-bold uppercase shadow-sm", statusStyle[post.status])}>
             {post.status}
           </span>
@@ -11871,6 +12579,7 @@ function PostEditor({
         <PostReadinessPanel
           post={post}
           campaign={campaign}
+          compact
           onImprove={(instruction) => {
             setRegenerateInstruction(instruction);
             setShowRegenerate(true);
@@ -11881,6 +12590,7 @@ function PostEditor({
         <BrandSafetyPanel
           post={post}
           campaign={campaign}
+          compact
           onUpdateCheck={(safetyCheck) => updatePost(post.id, { safetyCheck })}
           onAction={(instruction) => {
             setRegenerateInstruction(instruction);
@@ -11888,14 +12598,25 @@ function PostEditor({
           }}
         />
       </div>
-      {mode === "edit" && details.length > 0 && (
-        <div className="mt-4 grid gap-3 md:grid-cols-2">
-          {details.map((detail) => (
-            <div key={detail.label} className="rounded-lg border border-slate-200 bg-slate-50 p-3">
-              <p className="text-xs font-extrabold uppercase tracking-wide text-muted-foreground">{detail.label}</p>
-              <p className="mt-1 text-sm leading-6">{detail.value}</p>
+      {details.length > 0 && (
+        <div className="mt-4 rounded-lg border border-slate-200 bg-slate-50 p-3">
+          <button
+            type="button"
+            onClick={() => setShowPackageDetails((current) => !current)}
+            className="text-sm font-bold text-muted-foreground hover:text-foreground"
+          >
+            {showPackageDetails ? "Hide post package details" : "Post package details"}
+          </button>
+          {showPackageDetails && (
+            <div className="mt-3 grid gap-3 md:grid-cols-2">
+              {details.map((detail) => (
+                <div key={detail.label} className="rounded-lg border border-slate-200 bg-white p-3">
+                  <p className="text-xs font-extrabold uppercase tracking-wide text-muted-foreground">{detail.label}</p>
+                  <p className="mt-1 text-sm leading-6">{detail.value}</p>
+                </div>
+              ))}
             </div>
-          ))}
+          )}
         </div>
       )}
       <div className="mt-4 rounded-lg border border-slate-200 bg-slate-50 p-3">
@@ -11907,7 +12628,7 @@ function PostEditor({
         </button>
         {showWhy && (
           <div className="mt-3 grid gap-3 md:grid-cols-2">
-            <AnalysisBlock label="Rationale" value={post.rationale || "Created from the selected campaign brief and platform format."} />
+            <AnalysisBlock label="Rationale" value={post.rationale || "Created from the selected content brief and platform format."} />
             <AnalysisBlock label="Posting Account" value={post.profileName ? `${post.profileName} · ${post.profileType}` : campaign.profileName || "No saved Posting Account"} />
             <AnalysisBlock label="Simple style" value={(campaign.simpleStyleChips ?? []).length > 0 ? `${(campaign.simpleStyleChips ?? []).join(", ")}. These guided tone lightly without changing facts or who is speaking.` : "Conduit default."} />
             <AnalysisBlock label="Voice Influence" value={(campaign.voiceInfluenceNames ?? []).join(", ") || "No extra internal voices. Posting Account and Brand Voice Rules carried the voice."} />
@@ -11921,7 +12642,7 @@ function PostEditor({
             <AnalysisBlock label="Company Knowledge" value={(post.sourceLibraryNames ?? campaign.sourceLibraryNames ?? []).join(", ") || "No Company Knowledge items."} />
             <AnalysisBlock label="Brand Voice Rules" value="Global Brand Voice Rules and Conduit truth override external inspiration." />
             <AnalysisBlock label="Approved examples" value="Recent approved examples for this profile may be used as style examples when enabled." />
-            <AnalysisBlock label="Campaign type" value={campaign.repurposedFrom ? `Repurposed from ${campaign.repurposedFrom.label}` : campaign.campaignType ?? "Original"} />
+            <AnalysisBlock label="Brief type" value={campaign.repurposedFrom ? `Repurposed from ${campaign.repurposedFrom.label}` : campaign.campaignType ?? "Original"} />
           </div>
         )}
       </div>
@@ -11972,13 +12693,22 @@ function PostEditor({
       )}
       {post.status === "approved" && (
         <div className="mt-4 flex flex-col gap-3 rounded-lg border border-teal-200 bg-teal-50 p-4 text-sm text-teal-900 shadow-sm sm:flex-row sm:items-center sm:justify-between">
-          <span className="font-semibold">Saved to Ready to Post</span>
+          <span className="font-semibold">Approved and saved to Ready to Post</span>
           <Button size="sm" variant="secondary" onClick={() => setScreen("Ready to Post")}>
             View in Ready to Post
           </Button>
         </div>
       )}
       <div className="mt-4 flex flex-wrap justify-end gap-2">
+        <Button
+          variant="secondary"
+          onClick={() => {
+            setRegenerateInstruction("Make it more Conduit: more specific, grounded in factory automation and real operations, less hypey, more direct, and closer to the selected brief and media context.");
+            setShowRegenerate(true);
+          }}
+        >
+          Make it more Conduit
+        </Button>
         <Button
           variant="secondary"
           onClick={() => setShowRegenerate((current) => !current)}

@@ -21,6 +21,9 @@ type SafetyRequest = {
   } | null;
 };
 
+const hypePattern =
+  /\b(revolutioniz(?:e|es|ing)|transform(?:s|ing)? the way|unlock(?:s|ed|ing)?|elevat(?:e|es|ed|ing)|seamless(?:ly)?|cutting[- ]edge|game[- ]changing|next[- ]gen|supercharge(?:s|d|ing)?|empower(?:s|ed|ing)?|innovation for innovation(?:'s)? sake|future of work)\b/i;
+
 const safetySchema = {
   type: "object",
   additionalProperties: false,
@@ -43,11 +46,11 @@ function fallbackCheck(body: SafetyRequest): BrandSafetyCheck {
   const hasKnowledge = (body.campaign?.knowledgeSources ?? []).length > 0;
 
   if (!copy.trim()) notes.add("Post copy is empty");
-  if (/\bguarantee(?:d|s)?|proven|only|best|world[- ]?class|industry[- ]?leading|first|always|never|\d+%|\d+x\b/i.test(copy) && !hasKnowledge) {
+  if (/\bguarantee(?:d|s)?|proven|only|best|world[- ]?class|industry[- ]?leading|first|always|never|eliminates?|\d+%|\d+x\b/i.test(copy) && !hasKnowledge) {
     notes.add("Claim needs source");
   }
-  if (/\bin today's (?:fast-paced|ever-changing|rapidly evolving)|game[- ]changing|revolutionary|seamless|transform(?:ing|s)? the way|take .* to the next level\b/i.test(copy)) {
-    notes.add("Tone sounds generic");
+  if (/\bin today's (?:fast-paced|ever-changing|rapidly evolving)|take .* to the next level\b/i.test(copy) || hypePattern.test(copy)) {
+    notes.add("Tone sounds generic or over-polished");
   }
   if (/\bmassive|dominates?|crush(?:es|ing)?|disrupt(?:s|ing|ive)|unstoppable|the future of\b/i.test(copy)) {
     notes.add("Language may be overhyped");
@@ -134,7 +137,7 @@ export async function POST(request: Request) {
       body: JSON.stringify({
         model: process.env.OPENAI_MODEL ?? "gpt-4o-mini",
         instructions:
-          "You are a brand safety and claim-check reviewer for Conduit social posts. Return structured JSON only. Check unsupported claims, customer/confidential details, sensitive facility/media details, generic AI phrases, overhyped language, claims not grounded in Company Knowledge, and platform length issues. Be practical and concise.",
+          "You are a brand safety and claim-check reviewer for Conduit social posts. Return structured JSON only. Check unsupported claims, customer/confidential details, sensitive facility/media details, generic AI phrases, overhyped language, claims not grounded in Company Knowledge, and platform length issues. Flag vague hype language including revolutionize, transform the way, unlock, elevate, seamless, cutting-edge, game-changing, next-gen, supercharge, empower, innovation for innovation's sake, and future-of-work language. Flag guarantees, always, eliminates, and revolutionizes unless clearly supported by Company Knowledge. Keep recommendations practical and concise.",
         input: [
           {
             role: "user",

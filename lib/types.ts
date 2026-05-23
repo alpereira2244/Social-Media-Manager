@@ -257,6 +257,7 @@ export type PostQueueItem = {
   livePostUrl?: string;
   postedAt?: string;
   publishNotes?: string;
+  isSandbox?: boolean;
   metrics?: {
     impressions?: number;
     likes?: number;
