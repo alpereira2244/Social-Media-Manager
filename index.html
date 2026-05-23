@@ -1,0 +1,425 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Alberto Ops Dashboard</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <header class="topbar">
+      <div>
+        <p class="eyebrow">Summer internship command center</p>
+        <h1>Alberto Ops Dashboard</h1>
+      </div>
+      <div class="topbar-actions">
+        <button class="ghost-button" id="reset-demo" type="button">Reset Demo</button>
+        <button class="primary-button" id="export-data" type="button">Export</button>
+      </div>
+    </header>
+
+    <main class="app-shell dashboard-layout">
+      <aside class="sidebar" aria-label="Dashboard sections">
+        <button class="tab-button is-active" data-tab="today" type="button">Today</button>
+        <button class="tab-button" data-tab="tasks" type="button">Tasks</button>
+        <button class="tab-button" data-tab="notes" type="button">Notes</button>
+        <button class="tab-button" data-tab="bills" type="button">Bills</button>
+        <button class="tab-button" data-tab="weekly" type="button">Weekly</button>
+        <button class="tab-button" data-tab="access" type="button">Access</button>
+        <button class="tab-button" data-tab="priorities" type="button">Priorities</button>
+      </aside>
+
+      <div class="app-content">
+      <section class="start-panel app-view is-active" data-view="today" aria-label="Daily command center">
+        <div class="start-heading">
+          <div>
+            <p class="eyebrow">Open this first</p>
+            <h2>Today&apos;s Action Plan</h2>
+            <p id="current-date"></p>
+          </div>
+          <button class="primary-button" id="copy-standup" type="button">Copy Update</button>
+        </div>
+
+        <div class="start-grid">
+          <section class="focus-box">
+            <h3>1. Content</h3>
+            <div id="content-plan" class="mini-list"></div>
+          </section>
+
+          <section class="focus-box">
+            <h3>2. Bills</h3>
+            <div id="bill-alerts" class="mini-list"></div>
+          </section>
+
+          <section class="focus-box">
+            <h3>3. Do Next</h3>
+            <div id="today-plan" class="mini-list"></div>
+          </section>
+
+          <section class="focus-box">
+            <h3>Notes Inbox</h3>
+            <div id="waiting-brief" class="mini-list"></div>
+          </section>
+        </div>
+      </section>
+
+      <section class="priority-map app-view" data-view="priorities" id="priority-rules" aria-label="Priority map">
+        <div class="priority-intro">
+          <div>
+            <p class="eyebrow">Priority logic</p>
+            <h2>Alberto Priorities Only</h2>
+            <p>Based on the rows where Alberto is owner. Caro/Daniel-owned work is not your priority unless they hand you a piece.</p>
+          </div>
+          <button class="ghost-button" id="copy-manager-questions" type="button">Copy Questions</button>
+        </div>
+
+        <div class="priority-grid">
+          <article class="priority-card high">
+            <span class="priority-tag">Priority 1</span>
+            <h3>Must Not Slip</h3>
+            <ul>
+              <li>Post content every day and track each channel</li>
+              <li>Make sure bills, insurance, and accounting reporting are handled</li>
+              <li>Clarify and move forward ISO/SOC ownership</li>
+              <li>Set up automation hotline with Caro support</li>
+              <li>Coordinate onboarding merch with Evan/Caro</li>
+            </ul>
+          </article>
+
+          <article class="priority-card medium">
+            <span class="priority-tag">Priority 2</span>
+            <h3>Recurring Alberto Ownership</h3>
+            <ul>
+              <li>Create content backlog so daily posting is easier</li>
+              <li>Organize weekly team activities</li>
+              <li>Maintain office rhythm and supplies</li>
+              <li>Put together sales materials when requested</li>
+              <li>Support onboarding people with checklists and logistics</li>
+            </ul>
+          </article>
+
+          <article class="priority-card low">
+            <span class="priority-tag">Priority 3</span>
+            <h3>Lower Priority Tasks</h3>
+            <ul>
+              <li>Conduit metal sign</li>
+              <li>Get FDE's pagers</li>
+              <li>Other vendor/admin errands after approvals are clear</li>
+            </ul>
+          </article>
+        </div>
+
+        <div class="question-strip">
+          <strong>Do not absorb Caro/Daniel work by accident:</strong>
+          <span>Am I owner or support?</span>
+          <span>Is this Alberto-owned?</span>
+          <span>Who approves spend?</span>
+          <span>What does done mean?</span>
+        </div>
+      </section>
+
+      <section class="workspace app-view" data-view="tasks" id="task-backlog">
+        <aside class="panel">
+          <div class="panel-heading">
+            <h2>Add Work</h2>
+            <p>Drop in tasks, content, approvals, or follow-ups.</p>
+          </div>
+
+          <div class="template-row" aria-label="Quick task templates">
+            <button class="template-button" data-template="content" type="button">Content</button>
+            <button class="template-button" data-template="followup" type="button">Follow-up</button>
+            <button class="template-button" data-template="approval" type="button">Approval</button>
+            <button class="template-button" data-template="sales" type="button">Sales</button>
+          </div>
+
+          <form id="task-form" class="stack">
+            <label>
+              Task
+              <input id="task-title" name="title" required placeholder="Example: Pay insurance bill" />
+            </label>
+
+            <div class="two-col">
+              <label>
+                Lane
+                <select id="task-lane" name="lane">
+                  <option>Content</option>
+                  <option>Ops</option>
+                  <option>People</option>
+                  <option>Admin</option>
+                  <option>Sales</option>
+                  <option>Bills</option>
+                </select>
+              </label>
+
+              <label>
+                Priority
+                <select id="task-priority" name="priority">
+                  <option value="1">1 - Urgent</option>
+                  <option value="2">2 - Soon</option>
+                  <option value="3">3 - Normal</option>
+                </select>
+              </label>
+            </div>
+
+            <div class="two-col">
+              <label>
+                Due Date
+                <input id="task-due" name="due" type="date" />
+              </label>
+
+              <label>
+                Repeat
+                <select id="task-repeat" name="repeat">
+                  <option value="none">No repeat</option>
+                  <option value="daily">Daily</option>
+                  <option value="weekly">Weekly</option>
+                  <option value="monthly">Monthly</option>
+                </select>
+              </label>
+            </div>
+
+            <label>
+              Notes
+              <textarea id="task-notes" name="notes" rows="3" placeholder="Who owns it, links, next step, etc."></textarea>
+            </label>
+
+            <button class="primary-button" type="submit">Add Item</button>
+          </form>
+        </aside>
+
+        <section class="board" aria-label="Task board">
+          <div class="toolbar">
+            <div>
+              <h2>Task Backlog</h2>
+              <p>Add work here, then use the top action plan to run your day.</p>
+            </div>
+            <div class="filters" role="group" aria-label="Task filters">
+              <button class="filter is-active" data-filter="active" type="button">Active</button>
+              <button class="filter" data-filter="today" type="button">Today</button>
+              <button class="filter" data-filter="bills" type="button">Bills</button>
+              <button class="filter" data-filter="done" type="button">Done</button>
+            </div>
+          </div>
+
+          <div class="columns">
+            <div class="column">
+              <h3>Do Next</h3>
+              <div id="do-next" class="task-list"></div>
+            </div>
+            <div class="column">
+              <h3>Scheduled</h3>
+              <div id="scheduled" class="task-list"></div>
+            </div>
+            <div class="column">
+              <h3>Waiting / Later</h3>
+              <div id="waiting" class="task-list"></div>
+            </div>
+          </div>
+        </section>
+      </section>
+
+      <section class="accounting-workflow app-view" data-view="bills" id="accounting-workflow">
+        <div class="panel-heading">
+          <h2>Accounting Check Workflow</h2>
+          <p>Use this instead of duplicating a fake bill report. Verify in the real systems, then update monthly bills.</p>
+        </div>
+        <div id="accounting-steps" class="accounting-steps"></div>
+      </section>
+
+      <section class="waiting-tracker app-view" data-view="notes" id="notes-inbox">
+          <div class="panel-heading">
+            <h2>Notes Inbox</h2>
+            <p>Capture messy meeting notes, then convert the useful ones into tasks.</p>
+          </div>
+
+          <form id="note-form" class="waiting-form note-form">
+            <label>
+              Note
+              <textarea name="text" required rows="3" placeholder="Example: Caro said ask Evan about onboarding merch"></textarea>
+            </label>
+            <label>
+              Context
+              <input name="context" placeholder="Example: 1:1 with Caro" />
+            </label>
+            <button class="ghost-button" type="submit">Add Note</button>
+          </form>
+
+          <div class="finalize-strip">
+            <div>
+              <h3>Ready to process?</h3>
+              <p>Finalize turns open notes into task updates, new tasks, questions, bills, or reference notes.</p>
+            </div>
+            <button class="primary-button" id="finalize-notes" type="button">Finalize Notes</button>
+            <button class="ghost-button" id="undo-finalize" type="button" disabled>Undo Last</button>
+          </div>
+          <div id="finalize-summary" class="finalize-summary" hidden></div>
+
+          <div class="notes-split">
+            <div>
+              <h3>Open Notes</h3>
+              <div id="suggested-actions" class="waiting-list note-list"></div>
+            </div>
+            <div>
+              <div class="archive-heading">
+                <h3>Notes Archive</h3>
+                <select id="note-archive-filter" aria-label="Filter notes archive">
+                  <option value="active">Kept</option>
+                  <option value="archived">Archived</option>
+                  <option value="dismissed">Dismissed</option>
+                  <option value="all">All</option>
+                </select>
+              </div>
+              <div id="saved-notes" class="waiting-list note-list"></div>
+            </div>
+          </div>
+      </section>
+
+        <section class="access-checklist app-view" data-view="access" id="access-checklist">
+          <div class="panel-heading">
+            <h2>Access & Passwords</h2>
+            <p>Track accounts, usernames, passwords, and which tools still need invites.</p>
+          </div>
+
+          <form id="account-form" class="account-form">
+            <label>
+              Account
+              <input name="name" required placeholder="Example: Rho" />
+            </label>
+            <label>
+              Area
+              <input name="area" required placeholder="Example: Accounting" />
+            </label>
+            <label>
+              Username
+              <input name="username" placeholder="Email or login" />
+            </label>
+            <label>
+              Password
+              <input name="password" type="password" placeholder="Paste password" />
+            </label>
+            <label>
+              Link
+              <input name="url" type="url" placeholder="https://..." />
+            </label>
+            <label>
+              Notes
+              <input name="notes" placeholder="2FA, owner, approval notes" />
+            </label>
+            <button class="ghost-button" type="submit">Add Account</button>
+          </form>
+
+          <div class="account-toolbar">
+            <label>
+              Search accounts
+              <input id="account-search" type="search" placeholder="Search Rho, QuickBooks, LinkedIn..." />
+            </label>
+          </div>
+
+          <div id="access-list" class="tool-access-list"></div>
+        </section>
+
+      <section class="weekly-rhythm app-view" data-view="weekly" id="weekly-rhythm">
+        <div class="panel-heading">
+          <h2>Monday-Friday Weekly Rhythm</h2>
+          <p>Recurring office tasks by weekday. Check them off during the week; they reset the next week.</p>
+        </div>
+
+        <form id="weekly-task-form" class="weekly-task-form">
+          <label>
+            Task
+            <input name="title" required placeholder="Example: Restock drinks" />
+          </label>
+          <label>
+            Day
+            <select name="day">
+              <option value="1">Monday</option>
+              <option value="2">Tuesday</option>
+              <option value="3">Wednesday</option>
+              <option value="4">Thursday</option>
+              <option value="5">Friday</option>
+            </select>
+          </label>
+          <button class="ghost-button" type="submit">Add Weekly Task</button>
+        </form>
+
+        <div id="weekly-calendar" class="weekly-calendar"></div>
+      </section>
+
+      <section class="checklist-wrap app-view" data-view="bills" id="monthly-bill-section">
+        <div class="panel-heading">
+          <h2>Daily Checklist & Monthly Bills</h2>
+          <p>Daily routines live here. Weekly routines live in the calendar, and monthly bills are tracked below.</p>
+        </div>
+        <div id="checklist" class="checklist"></div>
+
+        <div class="monthly-heading">
+          <div>
+            <h2>Recurring Monthly Bills</h2>
+            <p>Check each bill off, record the paid date, and enter the amount paid.</p>
+          </div>
+          <div class="monthly-stats">
+            <span id="monthly-bill-count" class="monthly-count">0 / 0 paid</span>
+            <span id="monthly-bill-total" class="monthly-count">Total $0</span>
+            <button class="ghost-button" id="export-monthly-summary" type="button">Export Excel Summary</button>
+          </div>
+        </div>
+        <form id="monthly-bill-form" class="monthly-bill-form">
+          <label>
+            Bill
+            <input name="title" required placeholder="Example: Phone" />
+          </label>
+          <label>
+            Company
+            <input name="company" required placeholder="Example: Verizon" />
+          </label>
+          <button class="ghost-button" type="submit">Add Monthly Bill</button>
+        </form>
+        <div id="monthly-bills" class="monthly-bills"></div>
+
+        <div class="paid-ledger">
+          <div class="paid-ledger-heading">
+            <div>
+              <h3>Paid Bills This Month</h3>
+              <p>This fills in as you check monthly bills off.</p>
+            </div>
+            <span id="paid-ledger-total" class="monthly-count">Total $0</span>
+          </div>
+          <div id="paid-ledger-list" class="paid-ledger-list"></div>
+        </div>
+
+        <div class="accounting-access">
+          <div>
+            <h3>Weekly Accounting Report Access</h3>
+            <p>Use these systems when preparing the weekly accounting report.</p>
+          </div>
+          <div class="access-list">
+            <span>Rho</span>
+            <span>QuickBooks</span>
+            <span>Rippling</span>
+          </div>
+        </div>
+      </section>
+      </div>
+    </main>
+
+    <template id="task-template">
+      <article class="task-card">
+        <div class="task-main">
+          <label class="check-row">
+            <input class="task-toggle" type="checkbox" />
+            <span class="task-title"></span>
+          </label>
+          <p class="task-notes"></p>
+          <div class="subtask-list"></div>
+        </div>
+        <div class="task-meta"></div>
+        <div class="task-actions">
+          <button class="mini-button waiting-button" type="button">Waiting</button>
+          <button class="mini-button delete-button" type="button">Delete</button>
+        </div>
+      </article>
+    </template>
+
+    <script src="app.js"></script>
+  </body>
+</html>
