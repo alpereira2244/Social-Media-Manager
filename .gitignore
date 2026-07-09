@@ -1,5 +1,7 @@
 node_modules
+.node_modules*
 .next
+.next*
 out
 dist
 .env*.local
@@ -7,3 +9,4 @@ npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 .DS_Store
+.docx-preview/

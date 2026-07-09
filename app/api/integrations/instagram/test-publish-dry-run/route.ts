@@ -4,19 +4,26 @@ export const dynamic = "force-dynamic";
 
 export async function POST(request: Request) {
   const body = await request.json().catch(() => ({}));
+  const integrationPath =
+    String(body.integrationPath ?? "Instagram Login path") === "Facebook Page / Graph API path"
+      ? "Facebook Page / Graph API path"
+      : "Instagram Login path";
   const accountId = String(
     body.accountId ?? process.env.INSTAGRAM_SANDBOX_BUSINESS_ACCOUNT_ID ?? ""
   ).trim();
   const pageId = String(body.pageId ?? process.env.INSTAGRAM_SANDBOX_FACEBOOK_PAGE_ID ?? "").trim();
+  const instagramUserId = String(body.instagramUserId ?? process.env.INSTAGRAM_SANDBOX_USER_ID ?? "").trim();
   const metaAppId = String(body.metaAppId ?? process.env.INSTAGRAM_SANDBOX_META_APP_ID ?? "").trim();
   const postCopy = String(body.postCopy ?? "").trim();
   const mediaUrl = String(body.mediaUrl ?? "").trim();
   const hasAccessToken = Boolean(body.hasAccessToken || process.env.INSTAGRAM_SANDBOX_ACCESS_TOKEN);
+  const isInstagramLoginPath = integrationPath === "Instagram Login path";
 
   const missing = [
     !metaAppId && "Meta App ID",
-    !accountId && "Instagram Business Account ID",
-    !pageId && "Facebook Page ID",
+    isInstagramLoginPath && !instagramUserId && "Instagram User ID",
+    !isInstagramLoginPath && !accountId && "Instagram Business Account ID",
+    !isInstagramLoginPath && !pageId && "Facebook Page ID",
     !hasAccessToken && "Access token availability",
     !postCopy && "caption/post copy"
   ].filter(Boolean);
@@ -39,9 +46,11 @@ export async function POST(request: Request) {
     message: "Instagram sandbox dry-run passed. No post was published.",
     wouldSend: {
       provider: "instagram",
+      integrationPath,
       disabledEndpoint: "Instagram Graph API media container + publish flow",
-      instagramBusinessAccountId: accountId,
-      facebookPageId: pageId,
+      instagramUserId: isInstagramLoginPath ? instagramUserId : undefined,
+      instagramBusinessAccountId: isInstagramLoginPath ? undefined : accountId,
+      facebookPageId: isInstagramLoginPath ? undefined : pageId,
       captionLength: postCopy.length,
       mediaAttached: Boolean(mediaUrl),
       publishingEnabled: false

@@ -29,8 +29,7 @@
 body {
   margin: 0;
   background:
-    radial-gradient(circle at top left, rgba(20, 184, 166, 0.09), transparent 30%),
-    linear-gradient(180deg, rgba(249, 252, 252, 0.98), rgba(242, 247, 247, 0.98) 42%, rgba(248, 250, 252, 0.98)),
+    linear-gradient(180deg, rgba(249, 252, 252, 0.98), rgba(245, 249, 249, 0.98) 48%, rgba(248, 250, 252, 0.98)),
     hsl(var(--background));
   color: hsl(var(--foreground));
   font-family:
@@ -61,4 +60,20 @@ select {
 
 ::selection {
   background: rgba(20, 184, 166, 0.18);
+}
+
+details > summary {
+  list-style: none;
+}
+
+details > summary::-webkit-details-marker {
+  display: none;
+}
+
+.aspect-story {
+  aspect-ratio: 9 / 16;
+}
+
+.aspect-portrait {
+  aspect-ratio: 4 / 5;
 }

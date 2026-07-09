@@ -1,6 +1,7 @@
 import type {
   BrandVoiceProfile,
   Campaign,
+  ContentAngle,
   GeneratedPost,
   LibrarySource,
   LibrarySourceCategory,
@@ -17,6 +18,19 @@ import type {
 } from "@/lib/types";
 
 export const platforms: Platform[] = ["LinkedIn", "X", "Instagram", "TikTok"];
+export const contentAngles: ContentAngle[] = [
+  "Founder build-in-public",
+  "Deployment win",
+  "Company update",
+  "Customer proof",
+  "Product launch",
+  "Behind the scenes",
+  "Industry POV",
+  "Technical explanation",
+  "Recruiting",
+  "Event recap",
+  "Other"
+];
 export const profileTypes: ProfileType[] = [
   "Company Account",
   "Founder",
@@ -70,6 +84,12 @@ export const librarySourceCategories: LibrarySourceCategory[] = [
   "Investor",
   "Customer Story",
   "Recruiting",
+  "Transcript / Meeting Notes",
+  "Founder Notes",
+  "Sales Notes",
+  "Customer Conversation",
+  "Investor Narrative",
+  "Product Notes",
   "Other"
 ];
 export const librarySourcePlatforms: LibrarySourcePlatform[] = [

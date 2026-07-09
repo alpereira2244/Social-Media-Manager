@@ -128,40 +128,246 @@ These fields save with the queue item in Supabase when configured, or local
 fallback otherwise. The Analytics page shows total posted posts, impressions,
 likes, best platform by engagement, and top posts by engagement.
 
+## Intake
+
+`Intake` is the universal front door for new material. It combines one-off
+source triage, browser captures, and past-content imports so you do not have to
+decide the perfect destination first.
+
+It accepts:
+
+- website, blog, document, social profile, and social post URLs
+- pasted text, transcripts, notes, or rough ideas
+- document uploads
+- screenshot uploads
+- reusable media uploads
+- raw post ideas
+
+Click `Classify source` to get a recommended destination, confidence, and why
+the source belongs there. You can confirm the recommendation or change it before
+saving.
+
+Destination options:
+
+- `Company Knowledge`: Conduit truth layer, proof points, source material, and
+  reviewed context.
+- `Profile Voice Source`: internal/company/founder/team voice and cadence.
+- `Inspiration / Reference Profile`: external pattern-only inspiration.
+- `Competitor / Market Watch`: saved for market context and future monitoring.
+- `Audience Persona`: customer or audience voice/context.
+- `Media Library`: reusable visual/audio assets.
+- `Create Post / Content Brief`: starts a new draft brief from the intake.
+- `Manual review only`: keeps the item in intake history without using it yet.
+
+Important behavior:
+
+- Normal public website/blog URLs can use the existing website fetch flow.
+- Social links are saved as source links only. The app does not scrape X,
+  LinkedIn, Instagram, TikTok, YouTube, or Facebook.
+- External inspiration stays pattern-only and must never provide Conduit facts,
+  claims, or identity.
+- Company Knowledge remains the source of truth for generated claims.
+- Intake keeps recent history with status and destination links.
+
+### Browser capture bookmarklet
+
+Intake includes a lightweight `Browser capture` helper. Drag the
+`Capture to Conduit` button from Intake to your browser bookmarks bar.
+When you see a page, article, social post, or opportunity:
+
+1. Select useful text on the page if you want to include an excerpt.
+2. Click the bookmarklet.
+3. The bookmarklet opens `/capture` with query params:
+   - `url`: current page URL
+   - `title`: current page title
+   - `text`: selected text, if any
+   - `capturedAt`: timestamp
+4. `/capture` stores the payload in Intake browser captures using local
+   browser storage, keeps a temporary `sessionStorage` copy for the current
+   redirect, and then returns to the app. If you are signed out, captures remain
+   in that browser and can be reviewed after login.
+5. Intake shows Browser Captures so captured links, selected text, and
+   browser inputs can be triaged later. Each capture can be routed to Company
+   Knowledge, Opportunity Inbox, a Profile Voice Source, Media Library, Create
+   Post, or Manual Review.
+6. If Supabase is configured and the workspace is loaded, the app also persists
+   captures to the `source_captures` table. Social links are saved and triaged,
+   but they are not scraped automatically.
+
+This is not a browser extension and it does not scrape social platforms.
+LinkedIn, X, Instagram, TikTok, YouTube, and similar links are saved and
+triaged as references. Add screenshots, pasted text, notes, or future official
+API sync before treating social content as analyzed.
+
+### Past Content Import
+
+Intake also includes `Import past content` for manual past-content imports. Use
+it to paste multiple old posts or captions, upload CSV exports, upload
+TXT/Markdown files, or paste simple JSON. Pasted text is split into individual
+items by blank lines.
+
+CSV import is flexible and looks for common columns when present:
+
+- `platform`
+- `post copy`, `caption`, `content`, or `text`
+- `date`
+- `author`, `profile`, or `posting account`
+- `url`
+- `impressions`, `likes`, `comments`, `shares`/`reposts`, `saves`, `clicks`
+- `notes`
+- `status`
+
+Before saving, the import review step lets you choose a destination for each
+item:
+
+- `Content Library`
+- `Profile Voice Source`
+- `Approved examples`
+- `Company Knowledge`
+- `Feedback Memory`
+- `Manual review`
+
+Founder and company posts can be imported as Profile voice examples and
+optionally analyzed with deterministic fallback voice analysis. Past Conduit
+posts can be saved into Content Library, marked as approved examples, and used
+as positive Feedback Memory. Imported metrics are attached to posted historical
+items so Analytics and Performance Insights can use them.
+
+Inspiration/reference and competitor imports default to pattern-only behavior.
+They can teach structure, cadence, hooks, and style, but they never become
+Conduit facts or claims. Company Knowledge remains the truth layer.
+
+## Opportunity Inbox
+
+`Opportunity Inbox` is the manual social listening layer. Use it for potential
+posts, replies, mentions, trend ideas, competitor posts, news links, founder
+thoughts, sales notes, or customer stories that Conduit may want to respond to
+or turn into content.
+
+It is intentionally manual for now:
+
+- no social monitoring APIs are connected
+- no social platforms are scraped
+- source URLs are saved as references
+- analysis uses the pasted note/text, screenshot metadata, and user-provided
+  context
+
+Opportunity analysis can suggest why something matters, a Conduit angle,
+whether it should become a reply or standalone post, possible platforms,
+relevant Conduit Brain themes, risks, and a first draft idea. From an
+opportunity you can:
+
+- create a post/content brief
+- draft a reply
+- save useful context to Company Knowledge
+- save an external reference as an Inspiration / Reference profile
+- mark reviewed or archive
+
+Reply drafting is a dedicated safe-response workflow. Paste the comment,
+mention, shoutout, competitor claim, or question, then use `Draft reply` to
+generate a short reply, warmer reply, founder-led reply, and optional longer
+reply. Replies use Company Knowledge as the truth layer, Brand Voice Rules as
+guardrails, and the selected posting account for perspective. Approved replies
+are saved into Content Library as reply content. Nothing is posted
+automatically.
+
+When a post is created from an opportunity, Content Library shows
+`Created from opportunity` so performance can be traced later. Future
+integrations can feed this inbox automatically once account permissions and
+social listening APIs are ready.
+
+The classification route is `POST /api/intake/classify-source`. It uses OpenAI
+when `OPENAI_API_KEY` is configured and a deterministic fallback when it is not.
+
 ## Instagram sandbox scaffolding
 
 The `Connections` page includes an Instagram sandbox setup panel. This is
-planning and validation scaffolding only: real Instagram publishing, OAuth, and
-real Conduit account connections are still disabled.
+planning and validation scaffolding only: real Instagram publishing and real
+Conduit account connections are still disabled.
 
-Sandbox account requirements before future API testing:
+The setup supports two sandbox paths:
 
-- Instagram account is Business/Professional.
-- Instagram account is connected to a Facebook Page.
-- Meta Developer App exists.
-- Redirect URL is configured in the Meta app.
-- Required Instagram Graph API permissions are configured.
-- Sandbox access token is available.
+**Instagram Login path**
+
+- Intended for Instagram Professional accounts, including Creator sandbox accounts.
+- Requires a Creator or Business account type.
+- Requires Meta Developer App, Instagram Login configuration, redirect URL,
+  Instagram permissions, Instagram User ID, and server-side token status.
+- May avoid the Facebook Page-centered setup while still staying sandbox-only.
+
+**Facebook Page / Graph API path**
+
+- Requires an Instagram Professional account connected to a Facebook Page.
+- Requires Facebook Page ID, Instagram Business Account ID, and server-side page
+  access token status.
+
+Real publishing is disabled for both paths. Manual posting remains the
+production workflow.
 
 Optional server-side env vars for future dry-run identity checks:
 
 ```bash
+INSTAGRAM_CLIENT_ID=
+INSTAGRAM_CLIENT_SECRET=
+INSTAGRAM_REDIRECT_URI=
 INSTAGRAM_SANDBOX_META_APP_ID=
+INSTAGRAM_SANDBOX_USER_ID=
+INSTAGRAM_SANDBOX_USERNAME=
 INSTAGRAM_SANDBOX_BUSINESS_ACCOUNT_ID=
 INSTAGRAM_SANDBOX_FACEBOOK_PAGE_ID=
 INSTAGRAM_SANDBOX_ACCESS_TOKEN=
 ```
 
+Keep `INSTAGRAM_SANDBOX_ACCESS_TOKEN` server-side only. Do not paste it into
+the Connections UI and do not store the raw token in Supabase. The server routes
+only return token status:
+
+- `available_server_side`
+- `missing`
+- `expired_or_invalid`
+
+If `INSTAGRAM_SANDBOX_ACCESS_TOKEN` and `INSTAGRAM_SANDBOX_USER_ID` are present,
+the Instagram status and identity routes can perform a server-side sandbox
+identity check and return only metadata such as username, user ID, check status,
+and last checked time.
+
+For local development, set `INSTAGRAM_REDIRECT_URI` to:
+
+```bash
+http://localhost:3000/api/integrations/instagram/oauth/callback
+```
+
+For Vercel, set it to:
+
+```bash
+https://YOUR-VERCEL-DOMAIN/api/integrations/instagram/oauth/callback
+```
+
+Add the same redirect URI in the Meta Developer App's Instagram Login settings.
+The OAuth skeleton starts Instagram Login, handles the callback server-side,
+exchanges the code for a token, fetches Instagram identity, and stores only
+connection metadata plus token status. The raw token is not persisted; encrypted
+token storage must be added before publishing is enabled.
+
 The UI does not store real token values. It stores only token availability
 status and setup metadata in `social_connections`. Prefer server-side env vars
 for sandbox secrets. The current API routes are dry-run placeholders:
 
+- `GET /api/integrations/instagram/oauth/start`
+- `GET /api/integrations/instagram/oauth/callback`
+- `POST /api/integrations/instagram/disconnect`
 - `GET /api/integrations/instagram/status`
 - `POST /api/integrations/instagram/test-identity`
 - `POST /api/integrations/instagram/test-publish-dry-run`
+- `POST /api/integrations/instagram/publish-readiness`
 
 Manual publishing remains the production workflow: copy the caption, download
 media, open Instagram, publish manually, paste the live URL, and enter metrics.
+
+Instagram Ready to Post cards include a `Check Instagram publish readiness`
+button. It validates whether the queued post has Instagram media, a reasonable
+caption, the selected integration path requirements, and token availability. It
+always returns a dry-run result and never publishes.
 
 ## Website fetching for Company Knowledge
 
@@ -220,6 +426,163 @@ Security note: avoid uploading sensitive customer, account, credential, or
 private operational data until auth, permissions, and storage access rules are
 finalized for production.
 
+## Transcript and notes ingestion
+
+Company Knowledge includes an `Add transcript / notes` flow for meeting notes,
+Granola transcripts, founder notes, sales notes, customer conversations,
+investor narratives, and product notes.
+
+The flow saves:
+
+- title
+- source type
+- pasted transcript or notes
+- optional speaker labels
+- optional date
+- optional tags
+- intended use, such as Company Knowledge, Danny voice example, Sahil voice
+  example, customer pain source, product/source material, or save-only
+
+When `OPENAI_API_KEY` is configured, `/api/analyze-transcript` extracts key
+themes, useful phrases, customer pain points, product claims, founder voice
+examples, proof points, post ideas, and public safety notes. Without OpenAI, the
+app uses deterministic fallback analysis so the source can still be saved.
+
+Safe default: new transcript and notes sources are marked `Needs review` before
+they are used automatically in the Conduit Brain. Review the details panel, then
+choose `Use in Brain` when the source is safe to influence generation.
+
+Security note: avoid uploading sensitive customer/account data until permissions
+are confirmed.
+
+## Profile Source Sync and Voice Learning
+
+Profiles are designed to learn voice primarily from saved voice sources:
+account/profile URLs, specific post URLs, website/blog URLs, uploaded
+screenshots, pasted examples, and notes/transcript snippets. Open a profile,
+choose `Voice Sources`, and add a voice source.
+
+API keys are not required per profile. X, LinkedIn, Instagram, and TikTok direct
+sync require official platform API access and are not connected yet. The app
+does not scrape social platforms and does not pretend account sync works before
+it does. Owned-account API sync can be added later for Conduit, Danny, Sahil, or
+other approved accounts.
+
+For analysis today, use screenshots, pasted text, notes, public website/blog
+fetches, or best-effort public page analysis. Website/blog/doc URLs can be
+fetched through `POST /api/profile-sources/fetch` when the site allows public
+fetching. Social profile and post URLs are saved as first-class sources. They
+are not recurring sync connections, and saved-only links do not influence
+generation.
+
+`Try public analysis` on a social source runs
+`POST /api/profile-sources/public-link-analysis`. The route attempts one safe
+public fetch of the page, extracts readable text/metadata when available, and
+analyzes only content that is actually visible to the server. If LinkedIn, X,
+Instagram, TikTok, YouTube, or another platform blocks the request, the app
+marks the source `Saved link, fetch blocked`, keeps the URL, and suggests
+screenshots, pasted examples, notes, or future official API sync. LinkedIn
+company posts pages such as `linkedin.com/company/.../posts` often block
+automated fetching, so screenshots or pasted posts remain the practical fallback
+until approved API access exists.
+
+Source fetching rules:
+
+- website/blog/doc links: fetched server-side when public and readable, then
+  marked `Fetched, ready to analyze`
+- public social links: one-time best-effort public analysis when readable, then
+  marked `Public page analyzed`; if blocked, marked `Saved link, fetch blocked`
+- owned/internal social links: saved for future official API sync, with
+  screenshots/pasted examples available for analysis today
+- external inspiration/reference links: saved as pattern-only inspiration; no
+  API keys are requested and no facts/claims are learned from them
+- competitor/market watch links: saved for future monitoring; no scraping or
+  analysis is performed unless approved content is pasted or uploaded
+
+Each profile source stores:
+
+- source title
+- source kind: account URL, post URL, website, screenshot, pasted text, or notes
+- URL
+- platform
+- uploaded screenshot metadata when present
+- pasted or fetched text when present
+- source type, such as internal voice, company account, inspiration/reference,
+  competitor/market watch, or audience/persona
+- sync status
+- last synced / last analyzed
+- notes
+- pattern-only flag
+- analysis JSON when available
+
+The `API sync later` action is a safe placeholder for now. It explains that API
+sync is optional future work and recommends screenshots or pasted text for
+analysis today.
+
+Manual pasted examples remain available as a fallback in the same `Voice
+Sources` tab. Paste posts, captions, founder notes, transcript snippets, or
+other examples when you want the app to analyze voice before API sync exists.
+
+Each example stores:
+
+- title
+- platform/source
+- pasted content
+- optional notes
+- whether it should be used as a voice/style example
+- whether it is pattern-only and should not be copied
+- voice analysis when available
+
+When `OPENAI_API_KEY` is configured, `/api/analyze-profile-voice` extracts tone
+traits, hook patterns, sentence style, common topics, repeated phrases,
+formatting habits, reusable structures, what to imitate, what not to copy,
+platform-specific patterns, and confidence level. Without OpenAI, the app uses
+deterministic fallback analysis.
+
+Analyzed sources and manual examples roll up into the profile personality
+summary and can influence future generation through Posting Account, Simple Mode
+learned voice chips, or Advanced Mode Voice Influence. Saved links with no
+analysis are not treated as learned style. External Inspiration / Reference
+profiles are always pattern-only: they can influence structure, format, and
+energy, but never facts, claims, identity, or exact wording. Company Knowledge
+remains the source of truth for what Conduit says.
+
+Profile source routes:
+
+- `POST /api/profile-sources/fetch`
+- `POST /api/profile-sources/sync`
+- `POST /api/profile-sources/analyze`
+- `POST /api/profile-sources/public-link-analysis`
+- `GET /api/profile-sources/status`
+
+## Inspiration / Reference profiles
+
+Inspiration Patterns have been merged into Profiles. Use profile type
+`Inspiration / Reference` for outside brands, creators, companies, media teams,
+and trends. Use `Competitor / Market Watch` for market references and
+competitors. These profiles are pattern-only: they can influence structure,
+hooks, pacing, tone, visual ideas, and creative formats, but never Conduit
+facts, claims, identity, or exact wording.
+
+Company Knowledge remains the truth layer. Brand Voice Rules remain the global
+guardrails. Inspiration/reference profiles must never override either one.
+
+Inside a profile, add source links, screenshots, pasted examples, notes, or
+public website/blog pages from the Voice Sources tab. Social links are saved as
+references only and are not scraped. Website/blog links can be fetched when
+public. Screenshots and pasted examples can be analyzed now. Future official
+API sync can be added later for owned/supported accounts, but external
+inspiration profiles do not require API keys.
+
+Older Inspiration Pattern records are preserved as imported pattern-only
+reference material under Profiles and summarized in Company Knowledge as
+profile inspiration signals. New Create Post briefs should use Inspiration /
+Reference profiles from Advanced Mode instead of a separate Inspiration
+Patterns library.
+
+These routes do not call X, LinkedIn, Instagram, or TikTok APIs yet.
+`/api/profile-sources/sync` is intentionally a future-work placeholder.
+
 ## Media Library
 
 The Media Library stores reusable social assets so you can upload a photo,
@@ -244,6 +607,23 @@ analysis can be added later.
 
 In `Create Post`, choose either `Upload media` for a one-off campaign asset or
 `Select from Media Library` to reuse a saved asset.
+
+### Media-to-Post Packs
+
+From any Media Library asset, use `Generate content pack` to create a normal
+Content Brief backed by that media asset. The setup panel asks for posting
+account, style, main message, optional context notes, and selected platforms.
+
+The generated pack creates platform-native drafts for LinkedIn, X, Instagram,
+and/or TikTok/Reels, including post copy, overlay text, alt text, CTA, hashtags
+where useful, and short-form hook/script ideas. The drafts are saved as normal
+generated posts and opened in Review Drafts, so Post Readiness, Brand Safety,
+founder review, approval, Ready to Post, Content Calendar, Analytics, and
+Content Library all continue to work the same way.
+
+Generated briefs keep `mediaContext.assetId`, so the Media Library Usage tab can
+show which briefs/posts came from each asset. Video and audio packs use filename
+and notes for now; transcription and frame analysis remain future work.
 
 ## Demo mode
 
@@ -390,6 +770,102 @@ http://localhost:3000/api/status
 It reports whether Supabase env vars exist, whether app tables are reachable,
 and whether the `campaign-media` bucket can be reached. It never returns secret
 key values.
+
+### Feedback Memory
+
+Feedback Memory stores lightweight preference signals from edits,
+regeneration instructions, approvals, rejections, review notes, Brand Safety
+actions, and Post Readiness actions. It summarizes patterns such as preferring
+shorter posts, stronger hooks, fewer hashtags, more factory-floor specificity,
+less corporate language, or more media-grounded captions.
+
+This is not model fine-tuning. It is structured workspace data that is included
+in generation prompts as taste/style guidance. Company Knowledge remains the
+truth layer and Brand Voice Rules remain the global guardrails. Feedback Memory
+can be turned off, ignored item by item, marked important, or deleted from the
+Brand Voice Rules page.
+
+### Claim Library
+
+Company Knowledge includes a Claim Library inside the Conduit Brain. Use it to
+separate what Conduit can safely say from claims that need review or should be
+avoided.
+
+Claim types include:
+
+- Approved claim
+- Needs review
+- Do not say
+- Customer-sensitive
+- Proof-backed
+- Internal only
+
+Each claim can store the claim text, supporting source, source type, notes, risk
+level, reviewer, and last reviewed date. Claims are saved in Supabase in the
+`claim_library` table when shared storage is configured, with local browser
+fallback in local mode.
+
+The Claim Library does not automatically approve extracted statements. The
+`Extract candidate claims` action scans active Company Knowledge and adds
+candidates as review-needed items so a human can approve, edit, or mark them as
+do-not-say.
+
+Generation receives approved/proof-backed claims and do-not-say claims as part
+of the prompt context. It is instructed to prefer approved claims when relevant,
+avoid do-not-say claims and close rewrites, and keep needs-review claims out of
+public post copy unless reviewed. Company Knowledge remains the truth layer.
+
+Brand Safety / Claim Check compares drafts against the Claim Library. Approved
+matches show as supported, needs-review matches are flagged for review, and
+do-not-say matches are marked risky. Post Readiness also rewards approved or
+proof-backed claims and penalizes unsupported or review-needed claims.
+
+### Activity Log and Undo
+
+The Dashboard includes a lightweight Activity Log under Recent activity. It
+records major workspace actions such as captures, routing, opportunity work,
+approvals, queue changes, scheduling, archiving, hiding completed items,
+marking posts/replies done, and Feedback Memory signals.
+
+Activity Log is a safety layer, not the content archive. Content Library remains
+the permanent record of created, approved, posted, replied, archived, and
+repurposed content.
+
+Some actions include safe undo/restore support:
+
+- Hidden queue items can be restored.
+- Archived queue items, captures, and opportunities can be restored.
+- Clearing completed items from the Ready queue can be undone.
+
+Destructive test/demo deletes still require confirmation and are logged when
+they happen. Activity data is saved to Supabase when configured and falls back
+to local browser storage in local mode.
+
+### Manager Review Links
+
+Content Calendar and Ready to Post include `Share review link` actions for
+limited manager review. A link can be scoped to this week, a selected date
+range, selected posts/replies, Ready to Post only, or scheduled content only.
+
+Permissions are limited to:
+
+- View only
+- Comment only
+- Can suggest edits
+- Can approve/request changes
+
+Manager links open a restricted `/manager-review/[token]` portal. The portal
+shows only scoped schedule/queue content, copy, planned timing, media preview,
+readiness/safety summary, and review notes. It does not expose Company
+Knowledge, Profiles, Brand Voice Rules, admin screens, API keys, tokens, or any
+publishing controls.
+
+Suggested edits never overwrite the original automatically. They are saved as
+review feedback and appear in the main app, where the team can accept the edit,
+regenerate from feedback, or mark the item approved. Shared review data is saved
+in Supabase using the `review_links` and `review_feedback` tables. Local mode can
+draft link settings, but externally shareable manager portals require Supabase
+and the updated schema.
 
 ### Fallback behavior
 

@@ -1,9 +1,13 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 
+import { getSupabaseServiceClient } from "@/lib/supabase/server";
+
 export const dynamic = "force-dynamic";
 
 const appTables = [
+  "workspaces",
+  "workspace_members",
   "profiles",
   "knowledge_base_items",
   "brand_rules",
@@ -15,7 +19,14 @@ const appTables = [
   "media_files",
   "media_library",
   "post_feedback",
-  "social_connections"
+  "feedback_memory",
+  "social_connections",
+  "inspiration_patterns",
+  "opportunities",
+  "source_captures",
+  "activity_log",
+  "review_links",
+  "review_feedback"
 ];
 
 export async function GET() {
@@ -36,7 +47,8 @@ export async function GET() {
   let storageError = "";
 
   if (missingClient.length === 0) {
-    const supabase = createClient(
+    const serviceClient = getSupabaseServiceClient();
+    const supabase = serviceClient ?? createClient(
       process.env.NEXT_PUBLIC_SUPABASE_URL!,
       process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
       { auth: { persistSession: false } }
@@ -72,6 +84,7 @@ export async function GET() {
       missingClient,
       missingServer,
       serviceRoleConfigured: missingServer.length === 0,
+      checkedWith: missingServer.length === 0 ? "service_role" : "anon",
       tablesReachable: tableChecks.length > 0 && missingTables.length === 0,
       missingTables,
       tableChecks,

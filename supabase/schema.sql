@@ -107,6 +107,23 @@ create table if not exists post_feedback (
   created_at timestamptz default now()
 );
 
+create table if not exists feedback_memory (
+  id text primary key,
+  workspace_id text references workspaces(id) on delete cascade,
+  source_type text not null,
+  platform text,
+  posting_account_id text,
+  posting_account_name text,
+  original_content text,
+  revised_content text,
+  feedback_text text,
+  inferred_preference text,
+  metadata_json jsonb default '{}'::jsonb,
+  important boolean default false,
+  ignored boolean default false,
+  created_at timestamptz default now()
+);
+
 create table if not exists media_files (
   id uuid primary key default gen_random_uuid(),
   workspace_id text references workspaces(id) on delete cascade,
@@ -180,15 +197,15 @@ create table if not exists post_queue (
   workspace_id text references workspaces(id) on delete cascade,
   profile_id text references profiles(id) on delete set null,
   profile_name text,
-  campaign_id text not null references campaigns(id) on delete cascade,
+  campaign_id text,
   campaign_name text not null,
-  generated_post_id text not null references generated_posts(id) on delete cascade,
+  generated_post_id text not null,
   platform text not null,
   content_angle text,
   intent text,
   content text not null,
   -- supporting_json stores postCopy/supporting fields plus manual publishing
-  -- metadata and metrics: livePostUrl, postedAt, publishNotes, metrics.
+  -- metadata and metrics: livePostUrl, postedAt, publishNotes, hiddenFromQueue, metrics.
   supporting_json jsonb default '{}'::jsonb,
   media_used boolean default false,
   status text default 'Ready',
@@ -205,14 +222,134 @@ create table if not exists social_connections (
   workspace_id text references workspaces(id) on delete cascade,
   provider text not null,
   account_label text,
+  integration_path text default 'Instagram Login path',
   account_id text,
   page_id text,
+  instagram_user_id text,
+  instagram_username text,
+  account_type text,
+  token_status text default 'Not configured',
+  connected_at timestamptz,
   access_token_encrypted_or_placeholder text,
   status text default 'Sandbox setup available',
   is_sandbox boolean default true,
   metadata_json jsonb default '{}'::jsonb,
   created_at timestamptz default now(),
   updated_at timestamptz default now()
+);
+
+create table if not exists inspiration_patterns (
+  id text primary key,
+  workspace_id text references workspaces(id) on delete cascade,
+  title text not null,
+  source_url text,
+  platform text,
+  source_type text,
+  notes text,
+  screenshot_metadata_json jsonb default '{}'::jsonb,
+  pasted_text text,
+  fetched_content text,
+  tags text[] default '{}',
+  pattern_only boolean default true,
+  analysis_json jsonb default '{}'::jsonb,
+  status text default 'saved',
+  created_at timestamptz default now(),
+  updated_at timestamptz default now()
+);
+
+create table if not exists opportunities (
+  id text primary key,
+  workspace_id text references workspaces(id) on delete cascade,
+  title text not null,
+  opportunity_type text,
+  source_url text,
+  platform text,
+  pasted_text text,
+  screenshot_metadata_json jsonb default '{}'::jsonb,
+  urgency text default 'Medium',
+  status text default 'New',
+  tags text[] default '{}',
+  analysis_json jsonb default '{}'::jsonb,
+  reply_drafts_json jsonb default '[]'::jsonb,
+  related_campaign_id text references campaigns(id) on delete set null,
+  related_post_ids_json jsonb default '[]'::jsonb,
+  notes text,
+  created_at timestamptz default now(),
+  updated_at timestamptz default now()
+);
+
+create table if not exists source_captures (
+  id text primary key,
+  workspace_id text references workspaces(id) on delete cascade,
+  title text,
+  url text,
+  selected_text text,
+  source_domain text,
+  detected_platform text,
+  status text default 'New',
+  triage_json jsonb default '{}'::jsonb,
+  destination text,
+  routed_record_id text,
+  captured_at timestamptz default now(),
+  created_at timestamptz default now(),
+  updated_at timestamptz default now()
+);
+
+create table if not exists activity_log (
+  id text primary key,
+  workspace_id text references workspaces(id) on delete cascade,
+  action_type text not null,
+  object_type text not null,
+  object_id text,
+  title text,
+  summary text,
+  destination text,
+  metadata_json jsonb default '{}'::jsonb,
+  undo_json jsonb default '{}'::jsonb,
+  status text default 'success',
+  created_at timestamptz default now()
+);
+
+create table if not exists claim_library (
+  id text primary key,
+  workspace_id text references workspaces(id) on delete cascade,
+  claim_text text not null,
+  claim_type text not null default 'Needs review',
+  supporting_source_id text,
+  source_type text default 'manual entry',
+  notes text,
+  risk_level text default 'Medium',
+  reviewed_by text,
+  reviewed_at timestamptz,
+  metadata_json jsonb default '{}'::jsonb,
+  created_at timestamptz default now(),
+  updated_at timestamptz default now()
+);
+
+create table if not exists review_links (
+  id text primary key,
+  workspace_id text references workspaces(id) on delete cascade,
+  token text not null unique,
+  scope_type text not null default 'This week',
+  scope_json jsonb default '{}'::jsonb,
+  permission_level text not null default 'Comment only',
+  expires_at timestamptz,
+  created_by text,
+  created_at timestamptz default now(),
+  disabled_at timestamptz
+);
+
+create table if not exists review_feedback (
+  id text primary key,
+  workspace_id text references workspaces(id) on delete cascade,
+  review_link_id text references review_links(id) on delete set null,
+  content_type text not null default 'Post',
+  content_id text not null,
+  reviewer_name text,
+  comment text,
+  suggested_edit text,
+  status text not null default 'comment',
+  created_at timestamptz default now()
 );
 
 -- Keep existing projects compatible with the current app shape.
@@ -329,18 +466,119 @@ alter table post_queue add column if not exists status text default 'Ready';
 alter table post_queue add column if not exists planned_at timestamptz;
 alter table post_queue add column if not exists created_at timestamptz default now();
 alter table post_queue add column if not exists updated_at timestamptz default now();
+alter table post_queue drop constraint if exists post_queue_campaign_id_fkey;
+alter table post_queue drop constraint if exists post_queue_generated_post_id_fkey;
+alter table post_queue alter column campaign_id drop not null;
 
 alter table social_connections add column if not exists workspace_id text references workspaces(id) on delete cascade;
 alter table social_connections add column if not exists provider text;
 alter table social_connections add column if not exists account_label text;
+alter table social_connections add column if not exists integration_path text default 'Instagram Login path';
 alter table social_connections add column if not exists account_id text;
 alter table social_connections add column if not exists page_id text;
+alter table social_connections add column if not exists instagram_user_id text;
+alter table social_connections add column if not exists instagram_username text;
+alter table social_connections add column if not exists account_type text;
+alter table social_connections add column if not exists token_status text default 'Not configured';
+alter table social_connections add column if not exists connected_at timestamptz;
 alter table social_connections add column if not exists access_token_encrypted_or_placeholder text;
 alter table social_connections add column if not exists status text default 'Sandbox setup available';
 alter table social_connections add column if not exists is_sandbox boolean default true;
 alter table social_connections add column if not exists metadata_json jsonb default '{}'::jsonb;
 alter table social_connections add column if not exists created_at timestamptz default now();
 alter table social_connections add column if not exists updated_at timestamptz default now();
+
+alter table inspiration_patterns add column if not exists workspace_id text references workspaces(id) on delete cascade;
+alter table inspiration_patterns add column if not exists title text;
+alter table inspiration_patterns add column if not exists source_url text;
+alter table inspiration_patterns add column if not exists platform text;
+alter table inspiration_patterns add column if not exists source_type text;
+alter table inspiration_patterns add column if not exists notes text;
+alter table inspiration_patterns add column if not exists screenshot_metadata_json jsonb default '{}'::jsonb;
+alter table inspiration_patterns add column if not exists pasted_text text;
+alter table inspiration_patterns add column if not exists fetched_content text;
+alter table inspiration_patterns add column if not exists tags text[] default '{}';
+alter table inspiration_patterns add column if not exists pattern_only boolean default true;
+alter table inspiration_patterns add column if not exists analysis_json jsonb default '{}'::jsonb;
+alter table inspiration_patterns add column if not exists status text default 'saved';
+alter table inspiration_patterns add column if not exists created_at timestamptz default now();
+alter table inspiration_patterns add column if not exists updated_at timestamptz default now();
+
+alter table opportunities add column if not exists workspace_id text references workspaces(id) on delete cascade;
+alter table opportunities add column if not exists opportunity_type text;
+alter table opportunities add column if not exists source_url text;
+alter table opportunities add column if not exists platform text;
+alter table opportunities add column if not exists pasted_text text;
+alter table opportunities add column if not exists screenshot_metadata_json jsonb default '{}'::jsonb;
+alter table opportunities add column if not exists urgency text default 'Medium';
+alter table opportunities add column if not exists status text default 'New';
+alter table opportunities add column if not exists tags text[] default '{}';
+alter table opportunities add column if not exists analysis_json jsonb default '{}'::jsonb;
+alter table opportunities add column if not exists reply_drafts_json jsonb default '[]'::jsonb;
+alter table opportunities add column if not exists related_campaign_id text references campaigns(id) on delete set null;
+alter table opportunities add column if not exists related_post_ids_json jsonb default '[]'::jsonb;
+alter table opportunities add column if not exists notes text;
+alter table opportunities add column if not exists created_at timestamptz default now();
+alter table opportunities add column if not exists updated_at timestamptz default now();
+
+alter table source_captures add column if not exists workspace_id text references workspaces(id) on delete cascade;
+alter table source_captures add column if not exists title text;
+alter table source_captures add column if not exists url text;
+alter table source_captures add column if not exists selected_text text;
+alter table source_captures add column if not exists source_domain text;
+alter table source_captures add column if not exists detected_platform text;
+alter table source_captures add column if not exists status text default 'New';
+alter table source_captures add column if not exists triage_json jsonb default '{}'::jsonb;
+alter table source_captures add column if not exists destination text;
+alter table source_captures add column if not exists routed_record_id text;
+alter table source_captures add column if not exists captured_at timestamptz default now();
+alter table source_captures add column if not exists created_at timestamptz default now();
+alter table source_captures add column if not exists updated_at timestamptz default now();
+
+alter table activity_log add column if not exists workspace_id text references workspaces(id) on delete cascade;
+alter table activity_log add column if not exists action_type text;
+alter table activity_log add column if not exists object_type text;
+alter table activity_log add column if not exists object_id text;
+alter table activity_log add column if not exists title text;
+alter table activity_log add column if not exists summary text;
+alter table activity_log add column if not exists destination text;
+alter table activity_log add column if not exists metadata_json jsonb default '{}'::jsonb;
+alter table activity_log add column if not exists undo_json jsonb default '{}'::jsonb;
+alter table activity_log add column if not exists status text default 'success';
+alter table activity_log add column if not exists created_at timestamptz default now();
+
+alter table claim_library add column if not exists workspace_id text references workspaces(id) on delete cascade;
+alter table claim_library add column if not exists claim_text text;
+alter table claim_library add column if not exists claim_type text default 'Needs review';
+alter table claim_library add column if not exists supporting_source_id text;
+alter table claim_library add column if not exists source_type text default 'manual entry';
+alter table claim_library add column if not exists notes text;
+alter table claim_library add column if not exists risk_level text default 'Medium';
+alter table claim_library add column if not exists reviewed_by text;
+alter table claim_library add column if not exists reviewed_at timestamptz;
+alter table claim_library add column if not exists metadata_json jsonb default '{}'::jsonb;
+alter table claim_library add column if not exists created_at timestamptz default now();
+alter table claim_library add column if not exists updated_at timestamptz default now();
+
+alter table review_links add column if not exists workspace_id text references workspaces(id) on delete cascade;
+alter table review_links add column if not exists token text;
+alter table review_links add column if not exists scope_type text default 'This week';
+alter table review_links add column if not exists scope_json jsonb default '{}'::jsonb;
+alter table review_links add column if not exists permission_level text default 'Comment only';
+alter table review_links add column if not exists expires_at timestamptz;
+alter table review_links add column if not exists created_by text;
+alter table review_links add column if not exists created_at timestamptz default now();
+alter table review_links add column if not exists disabled_at timestamptz;
+
+alter table review_feedback add column if not exists workspace_id text references workspaces(id) on delete cascade;
+alter table review_feedback add column if not exists review_link_id text references review_links(id) on delete set null;
+alter table review_feedback add column if not exists content_type text default 'Post';
+alter table review_feedback add column if not exists content_id text;
+alter table review_feedback add column if not exists reviewer_name text;
+alter table review_feedback add column if not exists comment text;
+alter table review_feedback add column if not exists suggested_edit text;
+alter table review_feedback add column if not exists status text default 'comment';
+alter table review_feedback add column if not exists created_at timestamptz default now();
 
 -- Authenticated workspace-scoped MVP RLS strategy:
 -- Anonymous access is disabled for app data. Signed-in users can read rows for
@@ -382,12 +620,20 @@ alter table brand_rules enable row level security;
 alter table campaigns enable row level security;
 alter table generated_posts enable row level security;
 alter table post_feedback enable row level security;
+alter table feedback_memory enable row level security;
 alter table media_files enable row level security;
 alter table media_library enable row level security;
 alter table approved_posts enable row level security;
 alter table rejected_posts enable row level security;
 alter table post_queue enable row level security;
 alter table social_connections enable row level security;
+alter table inspiration_patterns enable row level security;
+alter table opportunities enable row level security;
+alter table source_captures enable row level security;
+alter table activity_log enable row level security;
+alter table claim_library enable row level security;
+alter table review_links enable row level security;
+alter table review_feedback enable row level security;
 
 revoke select, insert, update, delete on table
   workspaces,
@@ -398,12 +644,20 @@ revoke select, insert, update, delete on table
   campaigns,
   generated_posts,
   post_feedback,
+  feedback_memory,
   media_files,
   media_library,
   approved_posts,
   rejected_posts,
   post_queue,
-  social_connections
+  social_connections,
+  inspiration_patterns,
+  opportunities,
+  source_captures,
+  activity_log,
+  claim_library,
+  review_links,
+  review_feedback
 from anon;
 
 grant usage on schema public to authenticated;
@@ -416,12 +670,20 @@ grant select, insert, update, delete on table
   campaigns,
   generated_posts,
   post_feedback,
+  feedback_memory,
   media_files,
   media_library,
   approved_posts,
   rejected_posts,
   post_queue,
-  social_connections
+  social_connections,
+  inspiration_patterns,
+  opportunities,
+  source_captures,
+  activity_log,
+  claim_library,
+  review_links,
+  review_feedback
 to authenticated;
 
 -- Remove earlier internal-MVP anon policies if they exist.
@@ -449,6 +711,10 @@ drop policy if exists "scc anon select" on post_feedback;
 drop policy if exists "scc anon insert" on post_feedback;
 drop policy if exists "scc anon update" on post_feedback;
 drop policy if exists "scc anon delete" on post_feedback;
+drop policy if exists "scc anon select" on feedback_memory;
+drop policy if exists "scc anon insert" on feedback_memory;
+drop policy if exists "scc anon update" on feedback_memory;
+drop policy if exists "scc anon delete" on feedback_memory;
 drop policy if exists "scc anon select" on media_files;
 drop policy if exists "scc anon insert" on media_files;
 drop policy if exists "scc anon update" on media_files;
@@ -473,6 +739,34 @@ drop policy if exists "scc anon select" on social_connections;
 drop policy if exists "scc anon insert" on social_connections;
 drop policy if exists "scc anon update" on social_connections;
 drop policy if exists "scc anon delete" on social_connections;
+drop policy if exists "scc anon select" on inspiration_patterns;
+drop policy if exists "scc anon insert" on inspiration_patterns;
+drop policy if exists "scc anon update" on inspiration_patterns;
+drop policy if exists "scc anon delete" on inspiration_patterns;
+drop policy if exists "scc anon select" on opportunities;
+drop policy if exists "scc anon insert" on opportunities;
+drop policy if exists "scc anon update" on opportunities;
+drop policy if exists "scc anon delete" on opportunities;
+drop policy if exists "scc anon select" on source_captures;
+drop policy if exists "scc anon insert" on source_captures;
+drop policy if exists "scc anon update" on source_captures;
+drop policy if exists "scc anon delete" on source_captures;
+drop policy if exists "scc anon select" on activity_log;
+drop policy if exists "scc anon insert" on activity_log;
+drop policy if exists "scc anon update" on activity_log;
+drop policy if exists "scc anon delete" on activity_log;
+drop policy if exists "scc anon select" on claim_library;
+drop policy if exists "scc anon insert" on claim_library;
+drop policy if exists "scc anon update" on claim_library;
+drop policy if exists "scc anon delete" on claim_library;
+drop policy if exists "scc anon select" on review_links;
+drop policy if exists "scc anon insert" on review_links;
+drop policy if exists "scc anon update" on review_links;
+drop policy if exists "scc anon delete" on review_links;
+drop policy if exists "scc anon select" on review_feedback;
+drop policy if exists "scc anon insert" on review_feedback;
+drop policy if exists "scc anon update" on review_feedback;
+drop policy if exists "scc anon delete" on review_feedback;
 
 drop policy if exists "workspace select" on workspaces;
 drop policy if exists "workspace insert" on workspaces;
@@ -546,6 +840,15 @@ create policy "scc workspace insert" on post_feedback for insert to authenticate
 create policy "scc workspace update" on post_feedback for update to authenticated using (public.scc_can_write_workspace(workspace_id) or workspace_id is null) with check (public.scc_can_write_workspace(workspace_id));
 create policy "scc workspace delete" on post_feedback for delete to authenticated using (public.scc_can_write_workspace(workspace_id));
 
+drop policy if exists "scc workspace select" on feedback_memory;
+drop policy if exists "scc workspace insert" on feedback_memory;
+drop policy if exists "scc workspace update" on feedback_memory;
+drop policy if exists "scc workspace delete" on feedback_memory;
+create policy "scc workspace select" on feedback_memory for select to authenticated using (workspace_id is null or public.scc_is_workspace_member(workspace_id));
+create policy "scc workspace insert" on feedback_memory for insert to authenticated with check (public.scc_can_write_workspace(workspace_id));
+create policy "scc workspace update" on feedback_memory for update to authenticated using (public.scc_can_write_workspace(workspace_id) or workspace_id is null) with check (public.scc_can_write_workspace(workspace_id));
+create policy "scc workspace delete" on feedback_memory for delete to authenticated using (public.scc_can_write_workspace(workspace_id));
+
 drop policy if exists "scc workspace select" on media_files;
 drop policy if exists "scc workspace insert" on media_files;
 drop policy if exists "scc workspace update" on media_files;
@@ -599,6 +902,69 @@ create policy "scc workspace select" on social_connections for select to authent
 create policy "scc workspace insert" on social_connections for insert to authenticated with check (public.scc_can_write_workspace(workspace_id));
 create policy "scc workspace update" on social_connections for update to authenticated using (public.scc_can_write_workspace(workspace_id) or workspace_id is null) with check (public.scc_can_write_workspace(workspace_id));
 create policy "scc workspace delete" on social_connections for delete to authenticated using (public.scc_can_write_workspace(workspace_id));
+
+drop policy if exists "scc workspace select" on inspiration_patterns;
+drop policy if exists "scc workspace insert" on inspiration_patterns;
+drop policy if exists "scc workspace update" on inspiration_patterns;
+drop policy if exists "scc workspace delete" on inspiration_patterns;
+create policy "scc workspace select" on inspiration_patterns for select to authenticated using (workspace_id is null or public.scc_is_workspace_member(workspace_id));
+create policy "scc workspace insert" on inspiration_patterns for insert to authenticated with check (public.scc_can_write_workspace(workspace_id));
+create policy "scc workspace update" on inspiration_patterns for update to authenticated using (public.scc_can_write_workspace(workspace_id) or workspace_id is null) with check (public.scc_can_write_workspace(workspace_id));
+create policy "scc workspace delete" on inspiration_patterns for delete to authenticated using (public.scc_can_write_workspace(workspace_id));
+
+drop policy if exists "scc workspace select" on opportunities;
+drop policy if exists "scc workspace insert" on opportunities;
+drop policy if exists "scc workspace update" on opportunities;
+drop policy if exists "scc workspace delete" on opportunities;
+create policy "scc workspace select" on opportunities for select to authenticated using (workspace_id is null or public.scc_is_workspace_member(workspace_id));
+create policy "scc workspace insert" on opportunities for insert to authenticated with check (public.scc_can_write_workspace(workspace_id));
+create policy "scc workspace update" on opportunities for update to authenticated using (public.scc_can_write_workspace(workspace_id) or workspace_id is null) with check (public.scc_can_write_workspace(workspace_id));
+create policy "scc workspace delete" on opportunities for delete to authenticated using (public.scc_can_write_workspace(workspace_id));
+
+drop policy if exists "scc workspace select" on source_captures;
+drop policy if exists "scc workspace insert" on source_captures;
+drop policy if exists "scc workspace update" on source_captures;
+drop policy if exists "scc workspace delete" on source_captures;
+create policy "scc workspace select" on source_captures for select to authenticated using (workspace_id is null or public.scc_is_workspace_member(workspace_id));
+create policy "scc workspace insert" on source_captures for insert to authenticated with check (public.scc_can_write_workspace(workspace_id));
+create policy "scc workspace update" on source_captures for update to authenticated using (public.scc_can_write_workspace(workspace_id) or workspace_id is null) with check (public.scc_can_write_workspace(workspace_id));
+create policy "scc workspace delete" on source_captures for delete to authenticated using (public.scc_can_write_workspace(workspace_id));
+
+drop policy if exists "scc workspace select" on activity_log;
+drop policy if exists "scc workspace insert" on activity_log;
+drop policy if exists "scc workspace update" on activity_log;
+drop policy if exists "scc workspace delete" on activity_log;
+create policy "scc workspace select" on activity_log for select to authenticated using (workspace_id is null or public.scc_is_workspace_member(workspace_id));
+create policy "scc workspace insert" on activity_log for insert to authenticated with check (public.scc_can_write_workspace(workspace_id));
+create policy "scc workspace update" on activity_log for update to authenticated using (public.scc_can_write_workspace(workspace_id) or workspace_id is null) with check (public.scc_can_write_workspace(workspace_id));
+create policy "scc workspace delete" on activity_log for delete to authenticated using (public.scc_can_write_workspace(workspace_id));
+
+drop policy if exists "scc workspace select" on claim_library;
+drop policy if exists "scc workspace insert" on claim_library;
+drop policy if exists "scc workspace update" on claim_library;
+drop policy if exists "scc workspace delete" on claim_library;
+create policy "scc workspace select" on claim_library for select to authenticated using (workspace_id is null or public.scc_is_workspace_member(workspace_id));
+create policy "scc workspace insert" on claim_library for insert to authenticated with check (public.scc_can_write_workspace(workspace_id));
+create policy "scc workspace update" on claim_library for update to authenticated using (public.scc_can_write_workspace(workspace_id) or workspace_id is null) with check (public.scc_can_write_workspace(workspace_id));
+create policy "scc workspace delete" on claim_library for delete to authenticated using (public.scc_can_write_workspace(workspace_id));
+
+drop policy if exists "scc workspace select" on review_links;
+drop policy if exists "scc workspace insert" on review_links;
+drop policy if exists "scc workspace update" on review_links;
+drop policy if exists "scc workspace delete" on review_links;
+create policy "scc workspace select" on review_links for select to authenticated using (workspace_id is null or public.scc_is_workspace_member(workspace_id));
+create policy "scc workspace insert" on review_links for insert to authenticated with check (public.scc_can_write_workspace(workspace_id));
+create policy "scc workspace update" on review_links for update to authenticated using (public.scc_can_write_workspace(workspace_id) or workspace_id is null) with check (public.scc_can_write_workspace(workspace_id));
+create policy "scc workspace delete" on review_links for delete to authenticated using (public.scc_can_write_workspace(workspace_id));
+
+drop policy if exists "scc workspace select" on review_feedback;
+drop policy if exists "scc workspace insert" on review_feedback;
+drop policy if exists "scc workspace update" on review_feedback;
+drop policy if exists "scc workspace delete" on review_feedback;
+create policy "scc workspace select" on review_feedback for select to authenticated using (workspace_id is null or public.scc_is_workspace_member(workspace_id));
+create policy "scc workspace insert" on review_feedback for insert to authenticated with check (public.scc_can_write_workspace(workspace_id));
+create policy "scc workspace update" on review_feedback for update to authenticated using (public.scc_can_write_workspace(workspace_id) or workspace_id is null) with check (public.scc_can_write_workspace(workspace_id));
+create policy "scc workspace delete" on review_feedback for delete to authenticated using (public.scc_can_write_workspace(workspace_id));
 
 insert into storage.buckets (id, name, public)
 values ('campaign-media', 'campaign-media', true)

@@ -1,19 +1,27 @@
 import { getBrowserSupabaseClient, isSupabaseConfigured } from "@/lib/supabase/client";
 import type {
   ApprovedPostMemory,
+  ActivityLogItem,
   BrandSafetyCheck,
   BrandVoiceProfile,
   Campaign,
   CampaignMediaContext,
+  ClaimLibraryItem,
+  FeedbackMemoryItem,
   GeneratedPost,
+  InspirationPattern,
   KnowledgeDocument,
   LibrarySource,
   MediaAsset,
+  Opportunity,
   Platform,
   PostQueueItem,
   Profile,
   RejectedPostMemory,
-  SocialConnection
+  ReviewFeedback,
+  ReviewLink,
+  SocialConnection,
+  SourceCapture
 } from "@/lib/types";
 
 export type StorageMode = "local" | "supabase";
@@ -53,6 +61,14 @@ export type PersistedAppData = {
   postQueue: PostQueueItem[];
   mediaAssets: MediaAsset[];
   socialConnections: SocialConnection[];
+  inspirationPatterns: InspirationPattern[];
+  opportunities: Opportunity[];
+  feedbackMemory: FeedbackMemoryItem[];
+  sourceCaptures: SourceCapture[];
+  activityLog: ActivityLogItem[];
+  claimLibrary: ClaimLibraryItem[];
+  reviewLinks: ReviewLink[];
+  reviewFeedback: ReviewFeedback[];
   postQueueLoadError?: string;
 };
 
@@ -81,6 +97,8 @@ type GeneratedPostRow = {
     postCopy?: string;
     score?: number;
     generatedBy?: "AI" | "Mock";
+    contentOrigin?: GeneratedPost["contentOrigin"];
+    manualSourceContent?: string;
     mediaUsed?: boolean;
     rationale?: string;
     recommendedMediaUse?: string;
@@ -97,6 +115,7 @@ type GeneratedPostRow = {
     sourceLibraryIds?: string[];
     sourceLibraryNames?: string[];
     safetyCheck?: BrandSafetyCheck;
+    review?: GeneratedPost["review"];
   } | null;
   status: "draft" | "approved" | "rejected";
   previous_versions_json: string[] | null;
@@ -107,14 +126,150 @@ type SocialConnectionRow = {
   workspace_id?: string | null;
   provider: "instagram";
   account_label: string | null;
+  integration_path?: SocialConnection["integrationPath"] | null;
   account_id: string | null;
   page_id: string | null;
+  instagram_user_id?: string | null;
+  instagram_username?: string | null;
+  account_type?: SocialConnection["accountType"] | null;
+  token_status?: SocialConnection["tokenStatus"] | null;
+  connected_at?: string | null;
   access_token_encrypted_or_placeholder: string | null;
   status: SocialConnection["status"] | null;
   is_sandbox: boolean | null;
   metadata_json: SocialConnection["metadata"] | null;
   created_at: string;
   updated_at: string;
+};
+
+type InspirationPatternRow = {
+  id: string;
+  workspace_id?: string | null;
+  title: string | null;
+  source_url: string | null;
+  platform: InspirationPattern["platform"] | null;
+  source_type: InspirationPattern["sourceType"] | null;
+  notes: string | null;
+  screenshot_metadata_json: InspirationPattern["screenshot"] | null;
+  pasted_text: string | null;
+  tags: string[] | null;
+  pattern_only: boolean | null;
+  analysis_json: InspirationPattern["analysis"] | null;
+  status: InspirationPattern["status"] | null;
+  created_at: string;
+  updated_at: string;
+};
+
+type ClaimLibraryRow = {
+  id: string;
+  workspace_id?: string | null;
+  claim_text: string | null;
+  claim_type: ClaimLibraryItem["claimType"] | null;
+  supporting_source_id: string | null;
+  source_type: ClaimLibraryItem["sourceType"] | null;
+  notes: string | null;
+  risk_level: ClaimLibraryItem["riskLevel"] | null;
+  reviewed_by: string | null;
+  reviewed_at: string | null;
+  metadata_json: Record<string, unknown> | null;
+  created_at: string;
+  updated_at: string;
+};
+
+type OpportunityRow = {
+  id: string;
+  workspace_id?: string | null;
+  title: string | null;
+  opportunity_type: Opportunity["opportunityType"] | null;
+  source_url: string | null;
+  platform: Opportunity["platform"] | null;
+  pasted_text: string | null;
+  screenshot_metadata_json: Opportunity["screenshot"] | null;
+  urgency: Opportunity["urgency"] | null;
+  status: Opportunity["status"] | null;
+  tags: string[] | null;
+  analysis_json: Opportunity["analysis"] | null;
+  reply_drafts_json?: Opportunity["replyDrafts"] | null;
+  related_campaign_id: string | null;
+  related_post_ids_json: string[] | null;
+  notes: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+type FeedbackMemoryRow = {
+  id: string;
+  workspace_id?: string | null;
+  source_type: FeedbackMemoryItem["sourceType"];
+  platform: Platform | null;
+  posting_account_id: string | null;
+  posting_account_name?: string | null;
+  original_content: string | null;
+  revised_content: string | null;
+  feedback_text: string | null;
+  inferred_preference: string | null;
+  metadata_json: FeedbackMemoryItem["metadata"] | null;
+  important?: boolean | null;
+  ignored?: boolean | null;
+  created_at: string;
+};
+
+type SourceCaptureRow = {
+  id: string;
+  workspace_id?: string | null;
+  title: string | null;
+  url: string | null;
+  selected_text: string | null;
+  source_domain: string | null;
+  detected_platform: string | null;
+  status: SourceCapture["status"] | null;
+  triage_json: SourceCapture["triage"] | null;
+  destination: string | null;
+  routed_record_id: string | null;
+  captured_at: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+type ActivityLogRow = {
+  id: string;
+  workspace_id?: string | null;
+  action_type: string;
+  object_type: string;
+  object_id: string | null;
+  title: string | null;
+  summary: string | null;
+  destination: string | null;
+  metadata_json: ActivityLogItem["metadata"] | null;
+  undo_json: ActivityLogItem["undo"] | null;
+  status: ActivityLogItem["status"] | null;
+  created_at: string;
+};
+
+type ReviewLinkRow = {
+  id: string;
+  workspace_id?: string | null;
+  token: string;
+  scope_type: ReviewLink["scopeType"] | null;
+  scope_json: ReviewLink["scope"] | null;
+  permission_level: ReviewLink["permissionLevel"] | null;
+  expires_at: string | null;
+  created_by: string | null;
+  created_at: string;
+  disabled_at: string | null;
+};
+
+type ReviewFeedbackRow = {
+  id: string;
+  workspace_id?: string | null;
+  review_link_id: string | null;
+  content_type: ReviewFeedback["contentType"] | null;
+  content_id: string | null;
+  reviewer_name: string | null;
+  comment: string | null;
+  suggested_edit: string | null;
+  status: ReviewFeedback["status"] | null;
+  created_at: string;
 };
 
 export function appUsesSupabase() {
@@ -240,7 +395,15 @@ export async function loadSupabaseData(workspaceId = workspaceIdOrThrow()): Prom
     rejectedPostsResult,
     postQueueResult,
     mediaAssetsResult,
-    socialConnectionsResult
+    socialConnectionsResult,
+    inspirationPatternsResult,
+    opportunitiesResult,
+    feedbackMemoryResult,
+    sourceCapturesResult,
+    activityLogResult,
+    claimLibraryResult,
+    reviewLinksResult,
+    reviewFeedbackResult
   ] = await Promise.all([
     scopedSelect(supabase.from("profiles").select("*"), workspaceId).order("created_at", { ascending: false }),
     supabase
@@ -280,6 +443,54 @@ export async function loadSupabaseData(workspaceId = workspaceIdOrThrow()): Prom
       .select("*")
       .or(`workspace_id.eq.${workspaceId},workspace_id.is.null`)
       .order("updated_at", { ascending: false })
+      .limit(100),
+    supabase
+      .from("inspiration_patterns")
+      .select("*")
+      .or(`workspace_id.eq.${workspaceId},workspace_id.is.null`)
+      .order("updated_at", { ascending: false })
+      .limit(100),
+    supabase
+      .from("opportunities")
+      .select("*")
+      .or(`workspace_id.eq.${workspaceId},workspace_id.is.null`)
+      .order("updated_at", { ascending: false })
+      .limit(100),
+    supabase
+      .from("feedback_memory")
+      .select("*")
+      .or(`workspace_id.eq.${workspaceId},workspace_id.is.null`)
+      .order("created_at", { ascending: false })
+      .limit(100),
+    supabase
+      .from("source_captures")
+      .select("*")
+      .or(`workspace_id.eq.${workspaceId},workspace_id.is.null`)
+      .order("captured_at", { ascending: false })
+      .limit(100),
+    supabase
+      .from("activity_log")
+      .select("*")
+      .or(`workspace_id.eq.${workspaceId},workspace_id.is.null`)
+      .order("created_at", { ascending: false })
+      .limit(100),
+    supabase
+      .from("claim_library")
+      .select("*")
+      .or(`workspace_id.eq.${workspaceId},workspace_id.is.null`)
+      .order("updated_at", { ascending: false })
+      .limit(100),
+    supabase
+      .from("review_links")
+      .select("*")
+      .or(`workspace_id.eq.${workspaceId},workspace_id.is.null`)
+      .order("created_at", { ascending: false })
+      .limit(100),
+    supabase
+      .from("review_feedback")
+      .select("*")
+      .or(`workspace_id.eq.${workspaceId},workspace_id.is.null`)
+      .order("created_at", { ascending: false })
       .limit(100)
   ]);
 
@@ -377,6 +588,30 @@ export async function loadSupabaseData(workspaceId = workspaceIdOrThrow()): Prom
     socialConnections: socialConnectionsResult.error
       ? []
       : (socialConnectionsResult.data ?? []).map(socialConnectionFromRow),
+    inspirationPatterns: inspirationPatternsResult.error
+      ? []
+      : ((inspirationPatternsResult.data ?? []) as InspirationPatternRow[]).map(inspirationPatternFromRow),
+    opportunities: opportunitiesResult.error
+      ? []
+      : ((opportunitiesResult.data ?? []) as OpportunityRow[]).map(opportunityFromRow),
+    feedbackMemory: feedbackMemoryResult.error
+      ? []
+      : ((feedbackMemoryResult.data ?? []) as FeedbackMemoryRow[]).map(feedbackMemoryFromRow),
+    sourceCaptures: sourceCapturesResult.error
+      ? []
+      : ((sourceCapturesResult.data ?? []) as SourceCaptureRow[]).map(sourceCaptureFromRow),
+    activityLog: activityLogResult.error
+      ? []
+      : ((activityLogResult.data ?? []) as ActivityLogRow[]).map(activityLogFromRow),
+    claimLibrary: claimLibraryResult.error
+      ? []
+      : ((claimLibraryResult.data ?? []) as ClaimLibraryRow[]).map(claimLibraryFromRow),
+    reviewLinks: reviewLinksResult.error
+      ? []
+      : ((reviewLinksResult.data ?? []) as ReviewLinkRow[]).map(reviewLinkFromRow),
+    reviewFeedback: reviewFeedbackResult.error
+      ? []
+      : ((reviewFeedbackResult.data ?? []) as ReviewFeedbackRow[]).map(reviewFeedbackFromRow),
     postQueueLoadError: postQueueResult.error?.message
   };
 }
@@ -412,6 +647,124 @@ export async function deleteLibrarySourceFromSupabase(id: string) {
   if (!supabase) return;
 
   const { error } = await supabase.from("knowledge_base_items").delete().eq("id", id);
+  if (error) throw new Error(error.message);
+}
+
+export async function saveInspirationPatternToSupabase(pattern: InspirationPattern) {
+  const supabase = getBrowserSupabaseClient();
+  if (!supabase) return;
+
+  const { error } = await supabase.from("inspiration_patterns").upsert(inspirationPatternToRow(pattern));
+  if (error) throw new Error(error.message);
+}
+
+export async function deleteInspirationPatternFromSupabase(id: string) {
+  const supabase = getBrowserSupabaseClient();
+  if (!supabase) return;
+
+  const { error } = await supabase.from("inspiration_patterns").delete().eq("id", id);
+  if (error) throw new Error(error.message);
+}
+
+export async function saveOpportunityToSupabase(opportunity: Opportunity) {
+  const supabase = getBrowserSupabaseClient();
+  if (!supabase) return;
+
+  const { error } = await supabase.from("opportunities").upsert(opportunityToRow(opportunity));
+  if (error) throw new Error(error.message);
+}
+
+export async function saveFeedbackMemoryToSupabase(item: FeedbackMemoryItem) {
+  const supabase = getBrowserSupabaseClient();
+  if (!supabase) return;
+
+  const { error } = await supabase.from("feedback_memory").upsert(feedbackMemoryToRow(item));
+  if (error) throw new Error(error.message);
+}
+
+export async function deleteFeedbackMemoryFromSupabase(id: string) {
+  const supabase = getBrowserSupabaseClient();
+  if (!supabase) return;
+
+  const { error } = await supabase.from("feedback_memory").delete().eq("id", id);
+  if (error) throw new Error(error.message);
+}
+
+export async function saveSourceCaptureToSupabase(capture: SourceCapture) {
+  const supabase = getBrowserSupabaseClient();
+  if (!supabase) return;
+
+  const { error } = await supabase.from("source_captures").upsert(sourceCaptureToRow(capture));
+  if (error) throw new Error(error.message);
+}
+
+export async function deleteSourceCaptureFromSupabase(id: string) {
+  const supabase = getBrowserSupabaseClient();
+  if (!supabase) return;
+
+  const { error } = await supabase.from("source_captures").delete().eq("id", id);
+  if (error) throw new Error(error.message);
+}
+
+export async function saveActivityLogToSupabase(item: ActivityLogItem) {
+  const supabase = getBrowserSupabaseClient();
+  if (!supabase) return;
+
+  const { error } = await supabase.from("activity_log").upsert(activityLogToRow(item));
+  if (error) throw new Error(error.message);
+}
+
+export async function saveReviewLinkToSupabase(link: ReviewLink) {
+  const supabase = getBrowserSupabaseClient();
+  if (!supabase) return;
+
+  const { error } = await supabase.from("review_links").upsert(reviewLinkToRow(link));
+  if (error) throw new Error(error.message);
+}
+
+export async function saveReviewFeedbackToSupabase(feedback: ReviewFeedback) {
+  const supabase = getBrowserSupabaseClient();
+  if (!supabase) return;
+
+  const { error } = await supabase.from("review_feedback").upsert(reviewFeedbackToRow(feedback));
+  if (error) throw new Error(error.message);
+}
+
+export async function loadReviewFeedbackFromSupabase(workspaceId: string) {
+  const supabase = getBrowserSupabaseClient();
+  if (!supabase) return [];
+
+  const { data, error } = await supabase
+    .from("review_feedback")
+    .select("*")
+    .or(`workspace_id.eq.${workspaceId},workspace_id.is.null`)
+    .order("created_at", { ascending: false })
+    .limit(100);
+  if (error) throw new Error(error.message);
+  return ((data ?? []) as ReviewFeedbackRow[]).map(reviewFeedbackFromRow);
+}
+
+export async function deleteOpportunityFromSupabase(id: string) {
+  const supabase = getBrowserSupabaseClient();
+  if (!supabase) return;
+
+  const { error } = await supabase.from("opportunities").delete().eq("id", id);
+  if (error) throw new Error(error.message);
+}
+
+export async function saveClaimLibraryItemToSupabase(item: ClaimLibraryItem) {
+  const supabase = getBrowserSupabaseClient();
+  if (!supabase) return;
+
+  const { error } = await supabase.from("claim_library").upsert(claimLibraryToRow(item));
+  if (error) throw new Error(error.message);
+}
+
+export async function deleteClaimLibraryItemFromSupabase(id: string) {
+  const supabase = getBrowserSupabaseClient();
+  if (!supabase) return;
+
+  const { error } = await supabase.from("claim_library").delete().eq("id", id);
   if (error) throw new Error(error.message);
 }
 
@@ -565,6 +918,9 @@ export async function savePostQueueItemToSupabase(item: PostQueueItem) {
     content: item.content,
     supporting_json: {
       postCopy: item.postCopy,
+      contentType: item.contentType ?? "Post",
+      contentOrigin: item.contentOrigin,
+      manualSourceContent: item.manualSourceContent,
       rationale: item.rationale,
       recommendedMediaUse: item.recommendedMediaUse,
       altText: item.altText,
@@ -578,12 +934,17 @@ export async function savePostQueueItemToSupabase(item: PostQueueItem) {
       mediaAssetName: item.mediaAssetName,
       mediaPublicUrl: item.mediaPublicUrl,
       mediaStoragePath: item.mediaStoragePath,
+      opportunityId: item.opportunityId,
+      opportunityTitle: item.opportunityTitle,
       livePostUrl: item.livePostUrl,
       postedAt: item.postedAt,
       publishNotes: item.publishNotes,
       isSandbox: item.isSandbox,
+      hiddenFromQueue: item.hiddenFromQueue,
+      managerReviewOnly: item.managerReviewOnly,
       metrics: item.metrics ?? {},
-      safetyCheck: item.safetyCheck
+      safetyCheck: item.safetyCheck,
+      review: item.review
     },
     media_used: item.mediaUsed,
     status: item.status,
@@ -616,6 +977,14 @@ export async function savePostQueueItemToSupabase(item: PostQueueItem) {
     id: item.id,
     generatedPostId: item.generatedPostId
   });
+}
+
+export async function deletePostQueueItemFromSupabase(id: string) {
+  const supabase = getBrowserSupabaseClient();
+  if (!supabase) return;
+
+  const { error } = await supabase.from("post_queue").delete().eq("id", id);
+  if (error) throw new Error(error.message);
 }
 
 export async function saveMediaAssetToSupabase(asset: MediaAsset, file?: File | null) {
@@ -762,7 +1131,9 @@ function profileToRow(profile: Profile) {
       _avatarStoragePath: profile.avatarStoragePath,
       _whatWeLike: profile.whatWeLike,
       _patternsToLearn: profile.patternsToLearn,
-      _thingsNotToCopy: profile.thingsNotToCopy
+      _thingsNotToCopy: profile.thingsNotToCopy,
+      _voiceExamples: profile.voiceExamples ?? [],
+      _voiceSources: profile.voiceSources ?? []
     },
     updated_at: new Date().toISOString()
   };
@@ -801,6 +1172,12 @@ function profileFromRow(row: any): Profile {
     whatWeLike: personality._whatWeLike ?? "",
     patternsToLearn: personality._patternsToLearn ?? "",
     thingsNotToCopy: personality._thingsNotToCopy ?? "",
+    voiceExamples: Array.isArray(personality._voiceExamples)
+      ? personality._voiceExamples
+      : [],
+    voiceSources: Array.isArray(personality._voiceSources)
+      ? personality._voiceSources
+      : [],
     updatedAt: row.updated_at ?? ""
   };
 }
@@ -820,7 +1197,12 @@ function librarySourceToRow(source: LibrarySource) {
     last_checked: source.lastChecked ?? "Never",
     analysis_json: {
       ...source.analysis,
-      _documents: source.documents ?? []
+      _documents: source.documents ?? [],
+      _useFor: source.useFor ?? [],
+      _reviewStatus: source.reviewStatus,
+      _speakerLabels: source.speakerLabels,
+      _transcriptDate: source.transcriptDate,
+      _tags: source.tags ?? []
     },
     updated_at: new Date().toISOString()
   };
@@ -851,7 +1233,285 @@ function librarySourceFromRow(row: any): LibrarySource {
     documents: Array.isArray(analysis._documents)
       ? (analysis._documents as KnowledgeDocument[])
       : [],
+    useFor: Array.isArray(analysis._useFor) ? (analysis._useFor as string[]) : [],
+    reviewStatus:
+      analysis._reviewStatus === "Used in Brain" || analysis._reviewStatus === "Save only"
+        ? analysis._reviewStatus
+        : analysis._reviewStatus === "Needs review"
+          ? "Needs review"
+          : undefined,
+    speakerLabels: typeof analysis._speakerLabels === "string" ? analysis._speakerLabels : "",
+    transcriptDate: typeof analysis._transcriptDate === "string" ? analysis._transcriptDate : "",
+    tags: Array.isArray(analysis._tags) ? (analysis._tags as string[]) : [],
     updatedAt: row.updated_at ?? ""
+  };
+}
+
+function sourceCaptureToRow(capture: SourceCapture) {
+  return {
+    id: capture.id,
+    workspace_id: workspaceIdOrThrow(),
+    title: capture.title,
+    url: capture.url,
+    selected_text: capture.selectedText,
+    source_domain: capture.sourceDomain,
+    detected_platform: capture.detectedPlatform,
+    status: capture.status,
+    triage_json: capture.triage ?? null,
+    destination: capture.destination ?? null,
+    routed_record_id: capture.routedRecordId ?? null,
+    captured_at: capture.capturedAt,
+    created_at: capture.createdAt,
+    updated_at: new Date().toISOString()
+  };
+}
+
+function sourceCaptureFromRow(row: SourceCaptureRow): SourceCapture {
+  return {
+    id: row.id,
+    title: row.title ?? "Browser capture",
+    url: row.url ?? "",
+    selectedText: row.selected_text ?? "",
+    sourceDomain: row.source_domain ?? "",
+    detectedPlatform: row.detected_platform ?? "Other",
+    status:
+      row.status === "New" ||
+      row.status === "Triaged" ||
+      row.status === "Routed" ||
+      row.status === "Archived"
+        ? row.status
+        : "New",
+    triage: row.triage_json ?? undefined,
+    destination: row.destination ?? undefined,
+    routedRecordId: row.routed_record_id ?? undefined,
+    capturedAt: row.captured_at ?? row.created_at ?? "",
+    createdAt: row.created_at,
+    updatedAt: row.updated_at
+  };
+}
+
+function activityLogToRow(item: ActivityLogItem) {
+  return {
+    id: item.id,
+    workspace_id: workspaceIdOrThrow(),
+    action_type: item.actionType,
+    object_type: item.objectType,
+    object_id: item.objectId ?? null,
+    title: item.title,
+    summary: item.summary,
+    destination: item.destination ?? null,
+    metadata_json: item.metadata ?? null,
+    undo_json: item.undo ?? null,
+    status: item.status,
+    created_at: item.createdAt
+  };
+}
+
+function activityLogFromRow(row: ActivityLogRow): ActivityLogItem {
+  return {
+    id: row.id,
+    actionType: row.action_type,
+    objectType: row.object_type,
+    objectId: row.object_id ?? undefined,
+    title: row.title ?? "Activity",
+    summary: row.summary ?? "",
+    destination: row.destination ?? undefined,
+    status:
+      row.status === "success" || row.status === "warning" || row.status === "failed"
+        ? row.status
+        : "success",
+    metadata: row.metadata_json ?? undefined,
+    undo: row.undo_json?.type ? row.undo_json : undefined,
+    createdAt: row.created_at
+  };
+}
+
+function reviewLinkToRow(link: ReviewLink) {
+  return {
+    id: link.id,
+    workspace_id: workspaceIdOrThrow(),
+    token: link.token,
+    scope_type: link.scopeType,
+    scope_json: link.scope,
+    permission_level: link.permissionLevel,
+    expires_at: link.expiresAt ?? null,
+    created_by: link.createdBy ?? null,
+    created_at: link.createdAt,
+    disabled_at: link.disabledAt ?? null
+  };
+}
+
+function reviewLinkFromRow(row: ReviewLinkRow): ReviewLink {
+  return {
+    id: row.id,
+    token: row.token,
+    scopeType: row.scope_type ?? "This week",
+    scope: row.scope_json ?? {},
+    permissionLevel: row.permission_level ?? "Comment only",
+    expiresAt: row.expires_at ?? undefined,
+    createdBy: row.created_by ?? undefined,
+    createdAt: row.created_at,
+    disabledAt: row.disabled_at ?? undefined
+  };
+}
+
+function reviewFeedbackToRow(feedback: ReviewFeedback) {
+  return {
+    id: feedback.id,
+    workspace_id: workspaceIdOrThrow(),
+    review_link_id: feedback.reviewLinkId ?? null,
+    content_type: feedback.contentType,
+    content_id: feedback.contentId,
+    reviewer_name: feedback.reviewerName,
+    comment: feedback.comment,
+    suggested_edit: feedback.suggestedEdit ?? null,
+    status: feedback.status,
+    created_at: feedback.createdAt
+  };
+}
+
+function reviewFeedbackFromRow(row: ReviewFeedbackRow): ReviewFeedback {
+  return {
+    id: row.id,
+    reviewLinkId: row.review_link_id ?? undefined,
+    contentType: row.content_type ?? "Post",
+    contentId: row.content_id ?? "",
+    reviewerName: row.reviewer_name ?? "Manager",
+    comment: row.comment ?? "",
+    suggestedEdit: row.suggested_edit ?? undefined,
+    status: row.status ?? "comment",
+    createdAt: row.created_at
+  };
+}
+
+function inspirationPatternToRow(pattern: InspirationPattern) {
+  return {
+    id: pattern.id,
+    workspace_id: workspaceIdOrThrow(),
+    title: pattern.title,
+    source_url: pattern.sourceUrl,
+    platform: pattern.platform,
+    source_type: pattern.sourceType,
+    notes: pattern.notes,
+    screenshot_metadata_json: pattern.screenshot ?? null,
+    pasted_text: pattern.pastedText,
+    tags: pattern.tags,
+    pattern_only: pattern.patternOnly,
+    analysis_json: pattern.analysis ?? {},
+    status: pattern.status,
+    created_at: pattern.createdAt,
+    updated_at: new Date().toISOString()
+  };
+}
+
+function inspirationPatternFromRow(row: InspirationPatternRow): InspirationPattern {
+  const analysis =
+    row.analysis_json && Object.keys(row.analysis_json).length > 0
+      ? row.analysis_json
+      : undefined;
+
+  return {
+    id: row.id,
+    title: row.title ?? "Untitled Pattern",
+    sourceUrl: row.source_url ?? "",
+    platform: row.platform ?? "Other",
+    sourceType: row.source_type ?? "other",
+    notes: row.notes ?? "",
+    screenshot: row.screenshot_metadata_json ?? undefined,
+    pastedText: row.pasted_text ?? "",
+    tags: Array.isArray(row.tags) ? row.tags : [],
+    patternOnly: row.pattern_only ?? true,
+    analysis,
+    status: row.status ?? (analysis ? "analyzed" : "saved"),
+    createdAt: row.created_at,
+    updatedAt: row.updated_at
+  };
+}
+
+function opportunityToRow(opportunity: Opportunity) {
+  return {
+    id: opportunity.id,
+    workspace_id: workspaceIdOrThrow(),
+    title: opportunity.title,
+    opportunity_type: opportunity.opportunityType,
+    source_url: opportunity.sourceUrl,
+    platform: opportunity.platform,
+    pasted_text: opportunity.pastedText,
+    screenshot_metadata_json: opportunity.screenshot ?? null,
+    urgency: opportunity.urgency,
+    status: opportunity.status,
+    tags: opportunity.tags,
+    analysis_json: opportunity.analysis ?? {},
+    reply_drafts_json: opportunity.replyDrafts ?? [],
+    related_campaign_id: opportunity.relatedCampaignId ?? null,
+    related_post_ids_json: opportunity.relatedPostIds ?? [],
+    notes: opportunity.notes,
+    created_at: opportunity.createdAt,
+    updated_at: new Date().toISOString()
+  };
+}
+
+function opportunityFromRow(row: OpportunityRow): Opportunity {
+  const analysis =
+    row.analysis_json && Object.keys(row.analysis_json).length > 0
+      ? row.analysis_json
+      : undefined;
+
+  return {
+    id: row.id,
+    title: row.title ?? "Untitled Opportunity",
+    opportunityType: row.opportunity_type ?? "Other",
+    sourceUrl: row.source_url ?? "",
+    platform: row.platform ?? "Other",
+    pastedText: row.pasted_text ?? "",
+    screenshot: row.screenshot_metadata_json ?? undefined,
+    urgency: row.urgency ?? "Medium",
+    status: row.status ?? "New",
+    tags: Array.isArray(row.tags) ? row.tags : [],
+    analysis,
+    replyDrafts: Array.isArray(row.reply_drafts_json) ? row.reply_drafts_json : [],
+    relatedCampaignId: row.related_campaign_id ?? undefined,
+    relatedPostIds: Array.isArray(row.related_post_ids_json) ? row.related_post_ids_json : [],
+    notes: row.notes ?? "",
+    createdAt: row.created_at,
+    updatedAt: row.updated_at
+  };
+}
+
+function feedbackMemoryToRow(item: FeedbackMemoryItem) {
+  return {
+    id: item.id,
+    workspace_id: workspaceIdOrThrow(),
+    source_type: item.sourceType,
+    platform: item.platform ?? null,
+    posting_account_id: item.postingAccountId ?? null,
+    posting_account_name: item.postingAccountName ?? null,
+    original_content: item.originalContent ?? null,
+    revised_content: item.revisedContent ?? null,
+    feedback_text: item.feedbackText ?? null,
+    inferred_preference: item.inferredPreference,
+    metadata_json: item.metadata ?? {},
+    important: Boolean(item.important),
+    ignored: Boolean(item.ignored),
+    created_at: item.createdAt
+  };
+}
+
+function feedbackMemoryFromRow(row: FeedbackMemoryRow): FeedbackMemoryItem {
+  return {
+    id: row.id,
+    sourceType: row.source_type,
+    platform: row.platform ?? undefined,
+    postingAccountId: row.posting_account_id ?? undefined,
+    postingAccountName: row.posting_account_name ?? undefined,
+    originalContent: row.original_content ?? undefined,
+    revisedContent: row.revised_content ?? undefined,
+    feedbackText: row.feedback_text ?? undefined,
+    inferredPreference: row.inferred_preference ?? "Prefer clearer, more specific Conduit language.",
+    metadata: row.metadata_json ?? {},
+    important: Boolean(row.important),
+    ignored: Boolean(row.ignored),
+    createdAt: row.created_at
   };
 }
 
@@ -875,8 +1535,19 @@ function campaignToRow(campaign: Campaign) {
         voiceInfluenceNames: campaign.voiceInfluenceNames,
         inspirationProfileIds: campaign.inspirationProfileIds,
         inspirationProfileNames: campaign.inspirationProfileNames,
+        inspirationPatternIds: campaign.inspirationPatternIds,
+        inspirationPatternNames: campaign.inspirationPatternNames,
+        opportunityId: campaign.opportunityId,
+        opportunityTitle: campaign.opportunityTitle,
+        voiceExampleTitles: campaign.voiceExampleTitles,
         simpleStyleChips: campaign.simpleStyleChips,
-        simpleStyleInstructions: campaign.simpleStyleInstructions
+        simpleStyleInstructions: campaign.simpleStyleInstructions,
+        contentOrigin: campaign.contentOrigin,
+        manualSourceContent: campaign.manualSourceContent,
+        claimLibraryIds: campaign.claimLibraryIds,
+        claimLibraryApprovedClaims: campaign.claimLibraryApprovedClaims,
+        claimLibraryNeedsReviewClaims: campaign.claimLibraryNeedsReviewClaims,
+        claimLibraryDoNotSayClaims: campaign.claimLibraryDoNotSayClaims
       }
     : {
         intent: campaign.intent,
@@ -888,8 +1559,19 @@ function campaignToRow(campaign: Campaign) {
         voiceInfluenceNames: campaign.voiceInfluenceNames,
         inspirationProfileIds: campaign.inspirationProfileIds,
         inspirationProfileNames: campaign.inspirationProfileNames,
+        inspirationPatternIds: campaign.inspirationPatternIds,
+        inspirationPatternNames: campaign.inspirationPatternNames,
+        opportunityId: campaign.opportunityId,
+        opportunityTitle: campaign.opportunityTitle,
+        voiceExampleTitles: campaign.voiceExampleTitles,
         simpleStyleChips: campaign.simpleStyleChips,
-        simpleStyleInstructions: campaign.simpleStyleInstructions
+        simpleStyleInstructions: campaign.simpleStyleInstructions,
+        contentOrigin: campaign.contentOrigin,
+        manualSourceContent: campaign.manualSourceContent,
+        claimLibraryIds: campaign.claimLibraryIds,
+        claimLibraryApprovedClaims: campaign.claimLibraryApprovedClaims,
+        claimLibraryNeedsReviewClaims: campaign.claimLibraryNeedsReviewClaims,
+        claimLibraryDoNotSayClaims: campaign.claimLibraryDoNotSayClaims
       };
 
   return {
@@ -919,8 +1601,19 @@ function campaignFromRow(row: CampaignRow, posts: GeneratedPost[]): Campaign {
     voiceInfluenceNames,
     inspirationProfileIds,
     inspirationProfileNames,
+    inspirationPatternIds,
+    inspirationPatternNames,
+    opportunityId,
+    opportunityTitle,
+    voiceExampleTitles,
     simpleStyleChips,
     simpleStyleInstructions,
+    contentOrigin,
+    manualSourceContent,
+    claimLibraryIds,
+    claimLibraryApprovedClaims,
+    claimLibraryNeedsReviewClaims,
+    claimLibraryDoNotSayClaims,
     ...mediaOnlyMetadata
   } = mediaMetadata;
   const mediaAnalysis =
@@ -965,18 +1658,35 @@ function campaignFromRow(row: CampaignRow, posts: GeneratedPost[]): Campaign {
         )
       : "",
     generatedBy: row.generation_source ?? undefined,
+    contentOrigin:
+      typeof contentOrigin === "string"
+        ? (contentOrigin as Campaign["contentOrigin"])
+        : undefined,
+    manualSourceContent:
+      typeof manualSourceContent === "string"
+        ? manualSourceContent
+        : undefined,
     mediaContext,
     profileId: row.selected_profile_id ?? undefined,
     voiceInfluenceIds: Array.isArray(voiceInfluenceIds) ? voiceInfluenceIds as string[] : [],
     voiceInfluenceNames: Array.isArray(voiceInfluenceNames) ? voiceInfluenceNames as string[] : [],
     inspirationProfileIds: Array.isArray(inspirationProfileIds) ? inspirationProfileIds as string[] : [],
     inspirationProfileNames: Array.isArray(inspirationProfileNames) ? inspirationProfileNames as string[] : [],
+    inspirationPatternIds: Array.isArray(inspirationPatternIds) ? inspirationPatternIds as string[] : [],
+    inspirationPatternNames: Array.isArray(inspirationPatternNames) ? inspirationPatternNames as string[] : [],
+    opportunityId: typeof opportunityId === "string" ? opportunityId : undefined,
+    opportunityTitle: typeof opportunityTitle === "string" ? opportunityTitle : undefined,
+    voiceExampleTitles: Array.isArray(voiceExampleTitles) ? voiceExampleTitles as string[] : [],
     simpleStyleChips: Array.isArray(simpleStyleChips)
       ? simpleStyleChips as Campaign["simpleStyleChips"]
       : [],
     simpleStyleInstructions: Array.isArray(simpleStyleInstructions)
       ? simpleStyleInstructions as string[]
       : [],
+    claimLibraryIds: Array.isArray(claimLibraryIds) ? claimLibraryIds as string[] : [],
+    claimLibraryApprovedClaims: Array.isArray(claimLibraryApprovedClaims) ? claimLibraryApprovedClaims as string[] : [],
+    claimLibraryNeedsReviewClaims: Array.isArray(claimLibraryNeedsReviewClaims) ? claimLibraryNeedsReviewClaims as string[] : [],
+    claimLibraryDoNotSayClaims: Array.isArray(claimLibraryDoNotSayClaims) ? claimLibraryDoNotSayClaims as string[] : [],
     sourceLibraryIds: row.selected_knowledge_base_ids ?? [],
     sourceLibraryNames: []
   };
@@ -1000,6 +1710,8 @@ function generatedPostToRow(campaignId: string, post: GeneratedPost, index: numb
       postCopy: post.postCopy,
       score: post.score,
       generatedBy: post.generatedBy,
+      contentOrigin: post.contentOrigin,
+      manualSourceContent: post.manualSourceContent,
       mediaUsed: post.mediaUsed,
       rationale: post.rationale,
       recommendedMediaUse: post.recommendedMediaUse,
@@ -1015,7 +1727,8 @@ function generatedPostToRow(campaignId: string, post: GeneratedPost, index: numb
       profileRole: post.profileRole,
       sourceLibraryIds: post.sourceLibraryIds,
       sourceLibraryNames: post.sourceLibraryNames,
-      safetyCheck: post.safetyCheck
+      safetyCheck: post.safetyCheck,
+      review: post.review
     },
     status: post.status,
     previous_versions_json: post.previousContent ? [post.previousContent] : [],
@@ -1033,6 +1746,8 @@ function generatedPostFromRow(row: GeneratedPostRow): GeneratedPost {
     status: row.status ?? "draft",
     score: content.score ?? 90,
     generatedBy: content.generatedBy,
+    contentOrigin: content.contentOrigin,
+    manualSourceContent: content.manualSourceContent,
     mediaUsed: content.mediaUsed,
     previousContent: row.previous_versions_json?.[0],
     previousPostCopy: row.previous_versions_json?.[0],
@@ -1050,7 +1765,51 @@ function generatedPostFromRow(row: GeneratedPostRow): GeneratedPost {
     profileRole: content.profileRole,
     sourceLibraryIds: content.sourceLibraryIds ?? [],
     sourceLibraryNames: content.sourceLibraryNames ?? [],
-    safetyCheck: content.safetyCheck
+    safetyCheck: content.safetyCheck,
+    claimMatches: content.safetyCheck?.claimMatches ?? [],
+    review: content.review
+  };
+}
+
+function claimLibraryToRow(item: ClaimLibraryItem) {
+  return {
+    id: item.id,
+    workspace_id: workspaceIdOrThrow(),
+    claim_text: item.claimText,
+    claim_type: item.claimType,
+    supporting_source_id: item.supportingSourceId ?? null,
+    source_type: item.sourceType,
+    notes: item.notes ?? null,
+    risk_level: item.riskLevel,
+    reviewed_by: item.reviewedBy ?? null,
+    reviewed_at: item.reviewedAt ?? null,
+    metadata_json: {
+      ...(item.metadata ?? {}),
+      supportingSourceName: item.supportingSourceName
+    },
+    created_at: item.createdAt,
+    updated_at: item.updatedAt
+  };
+}
+
+function claimLibraryFromRow(row: ClaimLibraryRow): ClaimLibraryItem {
+  return {
+    id: row.id,
+    claimText: row.claim_text ?? "",
+    claimType: row.claim_type ?? "Needs review",
+    supportingSourceId: row.supporting_source_id ?? undefined,
+    supportingSourceName:
+      typeof row.metadata_json?.supportingSourceName === "string"
+        ? row.metadata_json.supportingSourceName
+        : undefined,
+    sourceType: row.source_type ?? "manual entry",
+    notes: row.notes ?? "",
+    riskLevel: row.risk_level ?? "Medium",
+    reviewedBy: row.reviewed_by ?? undefined,
+    reviewedAt: row.reviewed_at ?? undefined,
+    metadata: row.metadata_json ?? {},
+    createdAt: row.created_at ?? new Date().toISOString(),
+    updatedAt: row.updated_at ?? row.created_at ?? new Date().toISOString()
   };
 }
 
@@ -1089,6 +1848,7 @@ function postQueueItemFromRow(row: any): PostQueueItem {
   const supporting = row.supporting_json ?? {};
   return {
     id: row.id,
+    contentType: supporting.contentType ?? "Post",
     profileId: row.profile_id ?? undefined,
     profileName: row.profile_name ?? undefined,
     campaignId: row.campaign_id,
@@ -1099,6 +1859,8 @@ function postQueueItemFromRow(row: any): PostQueueItem {
     intent: row.intent ?? undefined,
     content: row.content ?? "",
     postCopy: supporting.postCopy ?? row.content ?? "",
+    contentOrigin: supporting.contentOrigin ?? undefined,
+    manualSourceContent: supporting.manualSourceContent ?? undefined,
     rationale: supporting.rationale ?? undefined,
     recommendedMediaUse: supporting.recommendedMediaUse ?? undefined,
     altText: supporting.altText ?? undefined,
@@ -1112,12 +1874,17 @@ function postQueueItemFromRow(row: any): PostQueueItem {
     mediaAssetName: supporting.mediaAssetName ?? undefined,
     mediaPublicUrl: supporting.mediaPublicUrl ?? undefined,
     mediaStoragePath: supporting.mediaStoragePath ?? undefined,
+    opportunityId: supporting.opportunityId ?? undefined,
+    opportunityTitle: supporting.opportunityTitle ?? undefined,
     livePostUrl: supporting.livePostUrl ?? undefined,
     postedAt: supporting.postedAt ?? undefined,
     publishNotes: supporting.publishNotes ?? undefined,
     isSandbox: Boolean(supporting.isSandbox),
+    hiddenFromQueue: Boolean(supporting.hiddenFromQueue),
+    managerReviewOnly: Boolean(supporting.managerReviewOnly),
     metrics: supporting.metrics ?? {},
     safetyCheck: supporting.safetyCheck ?? undefined,
+    review: supporting.review ?? undefined,
     mediaUsed: Boolean(row.media_used),
     status: row.status ?? "Ready",
     plannedAt: row.planned_at ?? undefined,
@@ -1172,8 +1939,14 @@ function socialConnectionToRow(connection: SocialConnection) {
     workspace_id: workspaceIdOrThrow(),
     provider: connection.provider,
     account_label: connection.accountLabel,
+    integration_path: connection.integrationPath ?? "Instagram Login path",
     account_id: connection.accountId || null,
     page_id: connection.pageId || null,
+    instagram_user_id: connection.instagramUserId || null,
+    instagram_username: connection.instagramUsername || null,
+    account_type: connection.accountType || null,
+    token_status: connection.tokenStatus ?? "Not configured",
+    connected_at: connection.connectedAt ?? null,
     access_token_encrypted_or_placeholder: connection.accessTokenStatus,
     status: connection.status,
     is_sandbox: connection.isSandbox,
@@ -1191,8 +1964,26 @@ function socialConnectionFromRow(row: SocialConnectionRow): SocialConnection {
     id: row.id,
     provider: row.provider ?? "instagram",
     accountLabel: row.account_label ?? "Instagram Sandbox",
+    integrationPath:
+      row.integration_path === "Facebook Page / Graph API path"
+        ? "Facebook Page / Graph API path"
+        : "Instagram Login path",
     accountId: row.account_id ?? "",
     pageId: row.page_id ?? "",
+    instagramUserId: row.instagram_user_id ?? row.metadata_json?.instagramUserId ?? "",
+    instagramUsername: row.instagram_username ?? row.metadata_json?.instagramUsername ?? "",
+    accountType:
+      row.account_type === "Creator" || row.account_type === "Business"
+        ? row.account_type
+        : row.metadata_json?.accountType === "Creator" || row.metadata_json?.accountType === "Business"
+          ? row.metadata_json.accountType
+          : "",
+    tokenStatus:
+      row.token_status === "Available server-side" || row.token_status === "Expired"
+        ? row.token_status
+        : row.metadata_json?.tokenStatus === "Available server-side" || row.metadata_json?.tokenStatus === "Expired"
+          ? row.metadata_json.tokenStatus
+          : "Not configured",
     accessTokenStatus:
       accessTokenStatus === "Available but not stored" ||
       accessTokenStatus === "Use server env var" ||
@@ -1202,10 +1993,14 @@ function socialConnectionFromRow(row: SocialConnectionRow): SocialConnection {
     status:
       row.status === "Sandbox configured" ||
       row.status === "Test publishing not enabled" ||
-      row.status === "Test publishing enabled"
+      row.status === "Test publishing enabled" ||
+      row.status === "connected_sandbox" ||
+      row.status === "needs_token_storage" ||
+      row.status === "disconnected"
         ? row.status
         : "Sandbox setup available",
     isSandbox: Boolean(row.is_sandbox),
+    connectedAt: row.connected_at ?? row.metadata_json?.connectedAt ?? undefined,
     metadata,
     createdAt: row.created_at,
     updatedAt: row.updated_at

@@ -1,5 +1,5 @@
-import { SocialCommandCenter } from "@/components/social-command-center";
+import { HomeClient } from "./home-client";
 
 export default function Home() {
-  return <SocialCommandCenter />;
+  return <HomeClient />;
 }

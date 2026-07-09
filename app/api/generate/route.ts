@@ -3,6 +3,7 @@ import type {
   ApprovedPostMemory,
   BrandVoiceProfile,
   CampaignMediaContext,
+  FeedbackMemorySummary,
   LibrarySource,
   Platform,
   Profile,
@@ -26,6 +27,18 @@ type GenerateRequest = {
   voiceInfluences?: Profile[];
   inspirationProfiles?: Profile[];
   approvedExamples?: ApprovedPostMemory[];
+  feedbackMemory?: FeedbackMemorySummary;
+  claimLibrary?: {
+    approvedClaims?: string[];
+    needsReviewClaims?: string[];
+    doNotSayClaims?: string[];
+    claimDetails?: Array<{
+      claimText: string;
+      claimType: string;
+      riskLevel?: string;
+      notes?: string;
+    }>;
+  };
   brandVoice: BrandVoiceProfile;
   voiceSource?: VoiceSource;
   sourceLibraryItems?: LibrarySource[];
@@ -171,7 +184,14 @@ const conduitWritingGuide = `Conduit writing style:
 - No generic SaaS language, no vague transformation language, no overhyped claims, no invented customer proof, and no unsupported metrics.
 - Avoid these phrases and close variants: ${bannedConduitPhrases.join(", ")}.
 - If Company Knowledge does not support a claim, avoid the claim or mention in rationale that it would need review. Do not put unsupported caveats in postCopy.
+- Claim Library is the approved/do-not-say layer inside Company Knowledge. Prefer approved/proof-backed claims when relevant. Never use do-not-say claims or close rewrites. Treat needs-review, customer-sensitive, internal-only, or unsupported claims as review items for rationale, not public facts.
 - Approved examples influence cadence, structure, and taste only. Never copy them word-for-word.
+- Profile voice examples influence tone, hooks, sentence rhythm, formatting, and cadence only. Never copy pasted examples word-for-word.
+- Profile source links are mostly stored for future sync. Use analyzed or synced source data when present; otherwise treat the links as references only and do not claim to have fetched them.
+- Do not use unanalyzed source links as learned voice. They only show that a source was saved for later.
+- Owned/internal analyzed profile sources can guide cadence, style, and voice for that person or company.
+- External inspiration/reference profile sources are pattern-only. They may guide structure, pacing, hooks, and creative patterns, but never facts, claims, customer names, identity, or exact wording.
+- External inspiration must never override Conduit Company Knowledge, Brand Voice Rules, claims, facts, or who is speaking.
 
 Platform hooks:
 - LinkedIn: first line must be specific and opinionated. Avoid "Excited to share" and generic announcements. Use short paragraphs.
@@ -186,6 +206,45 @@ Media rules:
 
 function truncate(value: string, maxLength = 3000) {
   return value.length > maxLength ? `${value.slice(0, maxLength)}...` : value;
+}
+
+function compactVoiceExamples(profile?: Profile) {
+  const manualExamples = (profile?.voiceExamples ?? [])
+    .filter((example) => example.useAsVoice && example.analysis)
+    .slice(0, 5)
+    .map((example) => ({
+      kind: "manual_example",
+      title: example.title,
+      platform: example.platform,
+      notes: example.notes,
+      patternOnly: example.patternOnly,
+      contentSample: truncate(example.content, 900),
+      analysis: example.analysis
+    }));
+  const sourceLinks = (profile?.voiceSources ?? [])
+    .slice(0, 8)
+    .map((source) => ({
+      kind: "source_link",
+      title: source.title,
+      sourceKind: source.sourceKind,
+      platform: source.platform,
+      sourceType: source.sourceType,
+      influenceType:
+        source.sourceType === "inspiration/reference" || source.sourceType === "competitor/market watch"
+          ? "external pattern-only inspiration"
+          : "owned/internal voice",
+      url: source.url,
+      syncStatus: source.syncStatus,
+      lastSynced: source.lastSynced,
+      lastAnalyzed: source.lastAnalyzed,
+      notes: source.notes,
+      patternOnly: source.patternOnly,
+      hasPastedText: Boolean(source.pastedText),
+      hasFetchedContent: Boolean(source.fetchedContent),
+      hasScreenshotAnalysis: Boolean(source.screenshot?.analysisText),
+      analysis: source.analysis
+    }));
+  return [...manualExamples, ...sourceLinks];
 }
 
 function compactRequest(body: GenerateRequest) {
@@ -233,7 +292,8 @@ function compactRequest(body: GenerateRequest) {
           notes: body.profile.notes,
           syncStatus: body.profile.syncStatus,
           lastChecked: body.profile.lastChecked,
-          mockPersonality: body.profile.personality
+          mockPersonality: body.profile.personality,
+          voiceExamples: compactVoiceExamples(body.profile)
       }
       : null,
     voiceInfluences: (body.voiceInfluences ?? []).slice(0, 5).map((profile) => ({
@@ -243,7 +303,8 @@ function compactRequest(body: GenerateRequest) {
       bio: profile.bio,
       examples: truncate(profile.examples, 2000),
       notes: profile.notes,
-      personality: profile.personality
+      personality: profile.personality,
+      voiceExamples: compactVoiceExamples(profile)
     })),
     inspirationProfiles: (body.inspirationProfiles ?? []).slice(0, 5).map((profile) => ({
       name: profile.name,
@@ -253,7 +314,11 @@ function compactRequest(body: GenerateRequest) {
       thingsNotToCopy: profile.thingsNotToCopy,
       examples: truncate(profile.examples, 2000),
       notes: profile.notes,
-      personality: profile.personality
+      personality: profile.personality,
+      voiceExamples: compactVoiceExamples(profile).map((example) => ({
+        ...example,
+        patternOnly: true
+      }))
     })),
     repurpose: body.repurpose
       ? {
@@ -270,6 +335,23 @@ function compactRequest(body: GenerateRequest) {
       mediaUsed: example.mediaUsed,
       finalContent: truncate(example.finalContent, 1500)
     })),
+    feedbackMemory: body.feedbackMemory?.enabled
+      ? {
+          topPreferences: body.feedbackMemory.topPreferences.slice(0, 8),
+          platformPreferences: body.feedbackMemory.platformPreferences,
+          profilePreferences: body.feedbackMemory.profilePreferences,
+          confidence: body.feedbackMemory.confidence,
+          eventCount: body.feedbackMemory.eventCount
+        }
+      : { enabled: false },
+    claimLibrary: body.claimLibrary
+      ? {
+          approvedClaims: (body.claimLibrary.approvedClaims ?? []).slice(0, 20),
+          needsReviewClaims: (body.claimLibrary.needsReviewClaims ?? []).slice(0, 20),
+          doNotSayClaims: (body.claimLibrary.doNotSayClaims ?? []).slice(0, 20),
+          claimDetails: (body.claimLibrary.claimDetails ?? []).slice(0, 40)
+        }
+      : null,
     brandVoice: body.brandVoice,
     voiceSource: body.voiceSource
       ? {
@@ -368,8 +450,8 @@ export async function POST(request: Request) {
     const conciseOutputRule =
       "Keep every field concise. postCopy should be ready to publish, rationale should be 1-2 sentences, and supporting fields should be short.";
     const promptText = isRegeneration
-      ? `Regenerate exactly one social post package from this JSON brief.\n\nHighest priority: follow the user's regeneration instruction. Then preserve the original campaign context.\n\n${conduitWritingGuide}\n\nContext priority order:\n1. Regeneration instruction\n2. Intent\n3. Details/raw notes\n4. Manual media notes/context\n5. AI media/image analysis\n6. Content angle\n7. Simple Mode style guidance, if present\n8. Posting Account\n9. Company Knowledge\n10. Recent approved examples\n11. Voice Influence\n12. Inspiration / Reference profiles\n13. Brand Voice Rules\n\nRules:\n- Return one replacement post package for the requested platform only.\n- ${cleanPostRule}\n- ${conciseOutputRule}\n- Posting Account determines perspective and who is speaking.\n- Simple Mode style chips are lightweight style guidance only; they do not change facts or who is speaking.\n- Voice Influence provides internal style/cadence examples only.\n- Inspiration / Reference profiles provide external format/style inspiration only. Never copy their wording and never let them override Conduit truth.\n- Do not write in first person as Danny/Sahil/founders unless that person is the Posting Account.\n- Follow the campaign template structure when provided, but never override the user's instruction, intent, details, or media notes.\n- Improve the current content according to the instruction.\n- Do not regenerate other platforms.\n- Do not invent facts not in the provided brief.\n\n${JSON.stringify(compactRequest(body), null, 2)}`
-      : `${isRepurpose ? "Repurpose existing content into new platform-native social post packages." : "Generate platform-specific social post packages from this JSON brief."} For selected platforms, provide exactly 3 variants. Variant 1 should be the recommended/default draft. Variant 2 should be shorter. Variant 3 should be more founder-led or reflective.\n\n${conduitWritingGuide}\n\nInput priority order, from highest to lowest:\n1. Intent\n2. Details/raw notes\n3. Manual media notes/context\n4. AI image/media analysis\n5. Source content being repurposed, if provided\n6. Content angle\n7. Posting Account personality/content\n8. Selected Company Knowledge\n9. Recent approved examples from the Posting Account\n10. Brand Voice Rules\n11. Simple Mode style guidance, if present\n12. Internal Voice Influence style/cadence\n13. Inspiration / Reference profile patterns\n14. Campaign template\n\nHard relevance rules:\n- Every generated post must clearly communicate the current intent.\n- Every generated post must use the current details/raw notes and media notes as the grounding context.\n- Every generated post must match the selected content angle.\n- Posting Account determines perspective and who is speaking.\n- Simple Mode style chips provide lightweight style guidance only; they do not change facts, claims, or identity.\n- For Conduit posts, use company voice with founder-style clarity when founder voices are selected as Voice Influence.\n- Do not write in first person as Danny, Sahil, or any founder unless that person is the Posting Account.\n- Voice Influence provides internal style/cadence examples only; it does not change who is speaking.\n- Inspiration / Reference profiles provide external structure, format, energy, and creative pattern inspiration only.\n- Never copy external inspiration wording, claims, examples, or identity.\n- Never let external inspiration override Conduit Company Knowledge or Brand Voice Rules.\n- The output should sound like Conduit or the selected Posting Account, not like the inspiration profile.\n- Follow the selected campaign template structure when provided, but intent, details/raw notes, repurpose source, and media notes are higher priority than the template.\n- ${cleanPostRule}\n- ${conciseOutputRule}\n- If repurposing, preserve the core idea of the source but do not copy the original post word-for-word.\n- If repurposing, rewrite natively for each target platform and adjust length, format, tone, and media use.\n- Details/raw notes are supporting context, not a license to drift into generic content.\n- Use approved examples only as style/cadence examples, not as facts for this campaign.\n- Prefer concrete language from Company Knowledge when it supports the current intent. Do not invent claims beyond it.\n- If manual media notes are present, every generated post must explicitly connect to those notes.\n- If image analysis is present, reference only what is actually visible or described by the analysis.\n- Avoid generic marketing language unless the selected content angle or campaign template is Product launch, or the user explicitly asks for marketing/product launch language.\n- Do not invent that the campaign is about marketing, content creation, social media workflow, or brand voice unless the brief says that.\n- Do not reuse default starter language or examples unless they appear in the current brief.\n- URLs are references only. Do not claim to have fetched or synced them.\n\nFor unselected platforms, return an empty array.\n\nIf image media is provided, analyze what is visible and include mediaAnalysis with description, content angles, caption ideas, and possible sensitivity warnings. If video or audio media is provided, do not invent transcript or frame details. Use only filename and manual media notes.\n\n${JSON.stringify(compactRequest(body), null, 2)}`;
+      ? `Regenerate exactly one social post package from this JSON brief.\n\nHighest priority: follow the user's regeneration instruction. Then preserve the original campaign context.\n\n${conduitWritingGuide}\n\nContext priority order:\n1. Regeneration instruction\n2. Intent\n3. Details/raw notes\n4. Manual media notes/context\n5. AI media/image analysis\n6. Content angle\n7. Simple Mode style guidance, if present\n8. Posting Account\n9. Company Knowledge\n10. Claim Library approved/do-not-say guidance\n11. Recent approved examples\n12. Voice Influence\n13. Inspiration / Reference profiles\n14. Brand Voice Rules\n\nRules:\n- Return one replacement post package for the requested platform only.\n- ${cleanPostRule}\n- ${conciseOutputRule}\n- Posting Account determines perspective and who is speaking.\n- Simple Mode style chips are lightweight style guidance only; they do not change facts or who is speaking.\n- Voice Influence provides internal style/cadence examples only.\n- Inspiration / Reference profiles provide external format/style inspiration only. Never copy wording and never let them override Conduit truth.\n- Do not write in first person as Danny/Sahil/founders unless that person is the Posting Account.\n- Follow the campaign template structure when provided, but never override the user's instruction, intent, details, or media notes.\n- Improve the current content according to the instruction.\n- Prefer approved Claim Library wording when it fits. Avoid do-not-say claims and mark needs-review claims only in rationale.\n- Do not regenerate other platforms.\n- Do not invent facts not in the provided brief.\n\n${JSON.stringify(compactRequest(body), null, 2)}`
+      : `${isRepurpose ? "Repurpose existing content into new platform-native social post packages." : "Generate platform-specific social post packages from this JSON brief."} For selected platforms, provide exactly 3 variants. Variant 1 should be the recommended/default draft. Variant 2 should be shorter. Variant 3 should be more founder-led or reflective.\n\n${conduitWritingGuide}\n\nInput priority order, from highest to lowest:\n1. Intent\n2. Details/raw notes\n3. Manual media notes/context\n4. AI image/media analysis\n5. Source content being repurposed, if provided\n6. Content angle\n7. Posting Account personality/content\n8. Selected Company Knowledge\n9. Claim Library approved/do-not-say guidance\n10. Recent approved examples from the Posting Account\n11. Brand Voice Rules\n12. Simple Mode style guidance, if present\n13. Internal Voice Influence style/cadence\n14. Inspiration / Reference profile patterns\n15. Campaign template\n\nHard relevance rules:\n- Every generated post must clearly communicate the current intent.\n- Every generated post must use the current details/raw notes and media notes as the grounding context.\n- Every generated post must match the selected content angle.\n- Posting Account determines perspective and who is speaking.\n- Simple Mode style chips provide lightweight style guidance only; they do not change facts, claims, or identity.\n- For Conduit posts, use company voice with founder-style clarity when founder voices are selected as Voice Influence.\n- Do not write in first person as Danny, Sahil, or any founder unless that person is the Posting Account.\n- Voice Influence provides internal style/cadence examples only; it does not change who is speaking.\n- Inspiration / Reference profiles provide external structure, format, energy, and creative pattern inspiration only.\n- Never copy external inspiration wording, claims, examples, or identity.\n- Never let external inspiration profiles override Conduit Company Knowledge or Brand Voice Rules.\n- The output should sound like Conduit or the selected Posting Account, not like the inspiration profile.\n- Follow the selected campaign template structure when provided, but intent, details/raw notes, repurpose source, and media notes are higher priority than the template.\n- ${cleanPostRule}\n- ${conciseOutputRule}\n- If repurposing, preserve the core idea of the source but do not copy the original post word-for-word.\n- If repurposing, rewrite natively for each target platform and adjust length, format, tone, and media use.\n- Details/raw notes are supporting context, not a license to drift into generic content.\n- Use approved examples only as style/cadence examples, not as facts for this campaign.\n- Prefer concrete language from Company Knowledge when it supports the current intent. Do not invent claims beyond it.\n- Prefer approved/proof-backed Claim Library claims when relevant. Avoid do-not-say claims and close rewrites. Needs-review claims must not be presented as facts in postCopy.\n- If manual media notes are present, every generated post must explicitly connect to those notes.\n- If image analysis is present, reference only what is actually visible or described by the analysis.\n- Avoid generic marketing language unless the selected content angle or campaign template is Product launch, or the user explicitly asks for marketing/product launch language.\n- Do not invent that the campaign is about marketing, content creation, social media workflow, or brand voice unless the brief says that.\n- Do not reuse default starter language or examples unless they appear in the current brief.\n- URLs are references only. Do not claim to have fetched or synced them.\n\nFor unselected platforms, return an empty array.\n\nIf image media is provided, analyze what is visible and include mediaAnalysis with description, content angles, caption ideas, and possible sensitivity warnings. If video or audio media is provided, do not invent transcript or frame details. Use only filename and manual media notes.\n\n${JSON.stringify(compactRequest(body), null, 2)}`;
 
     const userContent: Array<
       | { type: "input_text"; text: string }

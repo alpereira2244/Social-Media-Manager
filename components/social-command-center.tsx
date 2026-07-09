@@ -1,15 +1,15 @@
 "use client";
 
+import dynamic from "next/dynamic";
 import {
   BarChart3,
+  CalendarDays,
   Check,
   Clipboard,
   BookOpen,
   Download,
   ExternalLink,
   FileText,
-  Heart,
-  MessageCircle,
   PenLine,
   Plus,
   Repeat2,
@@ -20,91 +20,308 @@ import {
   Users,
   XCircle
 } from "lucide-react";
-import { type FormEvent, useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
+import { CommandBar, Header, screenTitle } from "@/components/social-command-center/app-shell";
+import { LoginScreen, WorkspaceConnectionIssueScreen } from "@/components/social-command-center/auth-screens";
+import { AnalysisBlock, BriefItem, LayerBlock, Pill, QueueFilter } from "@/components/social-command-center/common-ui";
+import { FieldLabel } from "@/components/social-command-center/field-label";
+import {
+  generateReviewToken,
+  managerFeedbackForItem,
+  managerFeedbackStatusLabel,
+  managerReviewUrl,
+  reviewExpirationIso
+} from "@/components/social-command-center/manager-review-utils";
+import {
+  isDeletableQueueTestItem,
+  manualPostingSteps,
+  manualReplySteps,
+  platformUrls,
+  queueExecutionTabs,
+  queueItemMatchesExecutionTab,
+  toDateTimeLocalValue,
+  type QueueExecutionTab
+} from "@/components/social-command-center/queue-execution-utils";
+import { PlatformPreview } from "@/components/social-command-center/platform-preview";
+import { BrandSafetyPanel } from "@/components/social-command-center/brand-safety-panel";
+import { PostReadinessPanel } from "@/components/social-command-center/post-readiness-panel";
+import { ReviewLinkSharePanel } from "@/components/social-command-center/review-link-share-panel";
+import {
+  ReviewWorkflowPanel,
+  revisedReview,
+  reviewWithDefault,
+  shouldMarkDraftRevised
+} from "@/components/social-command-center/review-workflow";
+import { ReviewQueueCard, type ReviewQueueItem } from "@/components/social-command-center/review-queue-card";
 import {
   defaultBrandVoice,
   defaultPastPosts,
+  contentAngles,
   initialCampaigns,
   initialLibrarySources,
   initialProfiles,
-  initialVoiceSources,
   librarySourceCategories,
   librarySourcePlatforms,
   platforms,
-  profileTypes,
-  sourceUrlTypes,
-  syncStatuses,
-  voiceSourcePurposes,
-  voiceSourcePlatforms,
-  voiceSourceTypes
+  profileTypes
 } from "@/lib/mock-data";
 import type {
   ApprovedPostMemory,
+  ActivityLogItem,
   BrandSafetyCheck,
   BrandVoiceProfile,
   Campaign,
   CampaignMediaContext,
   CampaignTemplate,
+  ClaimLibraryItem,
+  ClaimMatch,
+  ClaimRiskLevel,
+  ClaimType,
+  ContentOrigin,
   ContentAngle,
+  FeedbackMemoryItem,
+  FeedbackMemorySourceType,
+  FeedbackMemorySummary,
   GeneratedPost,
+  InspirationPattern,
+  InspirationPatternPlatform,
+  InspirationPatternSourceType,
+  IntakeClassification,
+  IntakeDestination,
+  IntakeStatus,
   LibrarySource,
   LibrarySourceAnalysis,
   LibrarySourceCategory,
   LibrarySourcePlatform,
   MediaAsset,
+  Opportunity,
+  OpportunityAnalysis,
+  OpportunityPlatform,
+  OpportunityReplyDraft,
+  OpportunityStatus,
+  OpportunityType,
+  OpportunityUrgency,
   Platform,
   PostQueueItem,
   PostStatus,
   QueueStatus,
+  ReviewFeedback,
+  ReviewMetadata,
+  ReviewLink,
+  ReviewLinkScopeType,
+  ReviewPermissionLevel,
+  ReviewWorkflowStatus,
   Profile,
+  ProfileSourceKind,
+  ProfileSourcePlatform,
+  ProfileSourceSyncStatus,
+  ProfileSourceType,
   ProfileType,
   RejectedPostMemory,
   SimpleStyleChip,
   SocialConnection,
+  SourceCapture,
+  SourceInboxHistoryItem,
   SourceUrlType,
-  SyncStatus,
-  VoiceAnalysis,
-  VoiceSource,
-  VoiceSourcePlatform,
-  VoiceSourcePurpose,
-  VoiceSourceType
+  SyncStatus
 } from "@/lib/types";
 import {
   appUsesSupabase,
+  deleteClaimLibraryItemFromSupabase,
   deleteCampaignFromSupabase,
   deleteApprovedPostFromSupabase,
   deleteLibrarySourceFromSupabase,
   deleteMediaAssetFromSupabase,
+  deletePostQueueItemFromSupabase,
   deleteProfileFromSupabase,
   getCurrentSupabaseUser,
   getOrCreateDefaultWorkspace,
   loadSupabaseData,
+  loadReviewFeedbackFromSupabase,
   recordPostFeedbackToSupabase,
   saveApprovedPostToSupabase,
   saveBrandRulesToSupabase,
   saveCampaignToSupabase,
+  saveClaimLibraryItemToSupabase,
+  saveFeedbackMemoryToSupabase,
+  deleteFeedbackMemoryFromSupabase,
   saveGeneratedPostToSupabase,
   saveLibrarySourceToSupabase,
   saveMediaAssetToSupabase,
+  saveOpportunityToSupabase,
   savePostQueueItemToSupabase,
   saveProfileToSupabase,
   saveRejectedPostToSupabase,
+  saveReviewFeedbackToSupabase,
+  saveReviewLinkToSupabase,
   saveSocialConnectionToSupabase,
-  sendPasswordResetEmail,
+  saveSourceCaptureToSupabase,
+  deleteSourceCaptureFromSupabase,
+  saveActivityLogToSupabase,
   signInWithPassword,
   signOutOfSupabase,
   signUpWithPassword,
   uploadKnowledgeDocumentToSupabase,
-  uploadProfileAvatarToSupabase,
+  type PersistedAppData,
   type StorageMode,
   type WorkspaceContext
 } from "@/lib/supabase/persistence";
+import { looksLikeGenericIntent, looksLikeGenericRawIdea } from "@/lib/content-quality";
+import { formatShortDate, formatShortDateTime } from "@/lib/date-format";
+import { feedbackMemorySummary, inferFeedbackPreference } from "@/lib/feedback-memory";
+import { readJsonResponse, withTimeout } from "@/lib/http-helpers";
+import {
+  countUrls,
+  currentCheckedAt,
+  getLastChecked,
+  getLibrarySourceDisplayName,
+  getSyncStatus,
+  getUrlType,
+  hasStoredUrls,
+  isTranscriptSourceCategory,
+  librarySyncReadinessMessage,
+  transcriptSourceCategories,
+  transcriptUseOptions
+} from "@/lib/library-source-utils";
+import { readLocalValue, writeLocalValue } from "@/lib/local-storage";
+import {
+  contentEngagementRate,
+  contentEngagementTotal,
+  contentImpressions,
+  engagementRate,
+  engagementTotal,
+  metricsHaveValues,
+  performanceRate,
+} from "@/lib/performance-metrics";
+import { extractPostDetail, userFacingPostContent } from "@/lib/post-content";
+import {
+  isLinkedInCompanyPostsProfileSource,
+  findDefaultPostingAccount,
+  isInspirationProfile,
+  isInternalVoiceProfile,
+  isPatternOnlyProfileType,
+  isSocialProfileSource,
+  isWebsiteProfileSource,
+  profileSourceDisplayStatus,
+  profileSourceKindForUrl,
+  profileSourceReadinessLabel,
+  profileSourceStatusLabel,
+  profileSourceTypeForProfileType,
+  sourceAnalyzeButtonLabel,
+  sourceHasAnalyzableContent,
+  sourceHasOnlySavedSocialUrl,
+  sourceLearningBasisLabel,
+  sourceLearningKind,
+  sourceNextStep,
+  sourceTypeDefaultsPatternOnly
+} from "@/lib/profile-source-utils";
+import {
+  analyzedProfileSources,
+  createPersonalitySummary,
+  learnedProfileCtaPatterns,
+  learnedProfileDoNotCopy,
+  learnedProfileHookPatterns,
+  learnedProfileImitate,
+  learnedProfilePacing,
+  learnedProfilePostStructures,
+  learnedProfileVisualStyle,
+  profileAnalyzedMaterialCount,
+  profileConfidenceLabel,
+  profileHasAnalyzedVoiceExamples,
+  profileHasOnlyNotesBasedLearning,
+  profileHasSavedSocialLinksWithoutAnalysis,
+  profileLearningBasisSummary,
+  profileSourceLinkCount,
+  profileVoiceExampleTitles,
+  profileVoiceSourceTitles
+} from "@/lib/profile-voice-analysis";
+import {
+  buildWeeklyContentPlan,
+  firstBrainTheme,
+  mostRepeatedLabel,
+  uniqueLabels
+} from "@/lib/planning-utils";
+import { inferMediaKindFromUrl, mediaTypeFromFile, readFileAsDataUrl } from "@/lib/media-utils";
+import {
+  campaignForQueueItem,
+  performanceInsights,
+  weeklyLearningReview
+} from "@/lib/performance-insights";
+import {
+  calendarItemDate,
+  normalizeQueueStatus,
+  queueContentType,
+} from "@/lib/queue-calendar";
+import {
+  countProfileUrls,
+  firstWebsiteUrl,
+  hasLinkedInOrXProfileUrl,
+  hasLinkedInOrXSourceUrl,
+  hasWebsiteProfileUrl,
+  hasWebsiteSourceUrl,
+  looksLikeUrl,
+  profileUrlsText,
+  profileUrlValues
+} from "@/lib/source-platforms";
+import { splitTags, truncateText, uniqueStrings } from "@/lib/text-utils";
 import { cn } from "@/lib/utils";
+
+const DashboardScreen = dynamic(() => import("@/components/social-command-center/dashboard").then((module) => module.Dashboard), {
+  ssr: false,
+  loading: () => <Card className="p-6">Loading dashboard...</Card>
+});
+
+const MediaLibraryScreen = dynamic(() => import("@/components/social-command-center/media-library").then((module) => module.MediaLibrary), {
+  ssr: false,
+  loading: () => <Card className="p-6">Loading media library...</Card>
+});
+
+const SourceInboxScreen = dynamic(() => import("@/components/social-command-center/source-inbox").then((module) => module.SourceInbox), {
+  ssr: false,
+  loading: () => <Card className="p-6">Loading Intake...</Card>
+});
+
+const ContentCalendarScreen = dynamic(() => import("@/components/social-command-center/content-calendar").then((module) => module.ContentCalendar), {
+  ssr: false,
+  loading: () => <Card className="p-6">Loading content calendar...</Card>
+});
+
+const AnalyticsScreen = dynamic(() => import("@/components/social-command-center/analytics").then((module) => module.Analytics), {
+  ssr: false,
+  loading: () => <Card className="p-6">Loading analytics...</Card>
+});
+
+const ConnectionsScreen = dynamic(() => import("@/components/social-command-center/connections").then((module) => module.Connections), {
+  ssr: false,
+  loading: () => <Card className="p-6">Loading connections...</Card>
+});
+
+const ContentLibraryScreen = dynamic(() => import("@/components/social-command-center/content-library").then((module) => module.ContentLibrary), {
+  ssr: false,
+  loading: () => <Card className="p-6">Loading content library...</Card>
+});
+
+const ProfilesScreen = dynamic(() => import("@/components/social-command-center/profiles").then((module) => module.Profiles), {
+  ssr: false,
+  loading: () => <Card className="p-6">Loading profiles...</Card>
+});
+
+const BrandRulesScreen = dynamic(() => import("@/components/social-command-center/brand-voice-rules").then((module) => module.BrandRules), {
+  ssr: false,
+  loading: () => <Card className="p-6">Loading brand voice rules...</Card>
+});
+
+const RepurposeScreen = dynamic(() => import("@/components/social-command-center/repurpose").then((module) => module.RepurposeCampaign), {
+  ssr: false,
+  loading: () => <Card className="p-6">Loading repurpose...</Card>
+});
 
 type Screen =
   | "Dashboard"
+  | "Source Inbox"
+  | "Opportunity Inbox"
   | "Profiles"
   | "Company Knowledge"
   | "Media Library"
@@ -113,54 +330,72 @@ type Screen =
   | "Repurpose"
   | "Content Library"
   | "Ready to Post"
+  | "Content Calendar"
   | "Review Drafts"
   | "Analytics"
   | "Connections";
+
+type ReviewQueueFilter =
+  | "All drafts"
+  | "Sent for review"
+  | "Changes requested"
+  | "Revised"
+  | "Manager approved / ready"
+  | "Ready to Post / Ready to Reply"
+  | "Archived";
+
+const reviewQueueFilters: ReviewQueueFilter[] = [
+  "All drafts",
+  "Sent for review",
+  "Changes requested",
+  "Revised",
+  "Manager approved / ready",
+  "Ready to Post / Ready to Reply",
+  "Archived"
+];
+
+const workspaceStartupTimeouts = {
+  authCheckMs: 30000,
+  workspaceSetupMs: 30000,
+  dataLoadMs: 45000,
+  uiWatchdogMs: 90000,
+  retryDelayMs: 1800
+};
 
 const navSections: Array<{
   title: string;
   items: { label: Screen; icon: React.ElementType }[];
 }> = [
   {
-    title: "Operate",
+    title: "Workflow",
     items: [
       { label: "Dashboard", icon: BarChart3 },
+      { label: "Source Inbox", icon: Clipboard },
       { label: "New Campaign", icon: Plus },
       { label: "Review Drafts", icon: PenLine },
       { label: "Ready to Post", icon: ListChecks },
+      { label: "Content Calendar", icon: CalendarDays },
+      { label: "Content Library", icon: BookOpen },
       { label: "Analytics", icon: BarChart3 }
     ]
   },
   {
-    title: "Assets",
+    title: "Knowledge & Assets",
     items: [
-      { label: "Content Library", icon: BookOpen },
-      { label: "Repurpose", icon: Repeat2 },
-      { label: "Media Library", icon: Upload }
-    ]
-  },
-  {
-    title: "Intelligence",
-    items: [
-      { label: "Profiles", icon: Users },
       { label: "Company Knowledge", icon: FileText },
+      { label: "Profiles", icon: Users },
+      { label: "Media Library", icon: Upload },
       { label: "Brand Voice Rules", icon: Sparkles }
     ]
   },
   {
-    title: "Settings / Integrations",
+    title: "Settings",
     items: [
       { label: "Connections", icon: Send }
     ]
   }
 ];
 
-function screenTitle(screen: Screen) {
-  if (screen === "New Campaign") return "Create Post";
-  if (screen === "Review Drafts") return "Review Drafts";
-  if (screen === "Ready to Post") return "Ready to Post";
-  return screen;
-}
 
 function friendlyApprovalMessage(
   outcome: "saved" | "local" | "failed"
@@ -174,18 +409,25 @@ const rawIdeaPlaceholder =
   "Example: This photo is from our new office/workshop. Write a founder post about building Conduit close to hardware, factories, and automation.";
 const legacyGenericIdea =
   "Describe what happened, why it matters, and what the audience should take away.";
-const contentAngles: ContentAngle[] = [
-  "Founder build-in-public",
-  "Deployment win",
-  "Company update",
-  "Customer proof",
-  "Product launch",
-  "Behind the scenes",
-  "Industry POV",
-  "Technical explanation",
-  "Recruiting",
-  "Event recap",
+
+const inspirationPatternPlatforms: InspirationPatternPlatform[] = [
+  "X",
+  "LinkedIn",
+  "Instagram",
+  "TikTok",
+  "YouTube",
+  "Website",
   "Other"
+];
+
+const inspirationPatternSourceTypes: InspirationPatternSourceType[] = [
+  "brand",
+  "creator",
+  "competitor",
+  "media team",
+  "customer/audience",
+  "trend",
+  "other"
 ];
 
 type CampaignTemplateConfig = {
@@ -196,6 +438,14 @@ type CampaignTemplateConfig = {
   mediaNotesPlaceholder: string;
   recommendedPlatforms: Platform[];
   helperQuestions: string[];
+};
+
+type MediaContentPackConfig = {
+  postingAccountId: string;
+  styleChip: SimpleStyleChip;
+  intent: string;
+  contextNotes: string;
+  platforms: Platform[];
 };
 
 const campaignTemplateConfigs: Record<CampaignTemplate, CampaignTemplateConfig> = {
@@ -365,56 +615,6 @@ const campaignTemplateConfigs: Record<CampaignTemplate, CampaignTemplateConfig> 
     ]
   }
 };
-const queueStatuses: QueueStatus[] = ["Ready", "Scheduled", "Posted", "Archived"];
-
-const platformUrls: Record<Platform, string> = {
-  Instagram: "https://www.instagram.com/",
-  LinkedIn: "https://www.linkedin.com/",
-  X: "https://x.com/",
-  TikTok: "https://www.tiktok.com/"
-};
-
-const manualPostingSteps: Record<Platform, string[]> = {
-  Instagram: [
-    "Download media",
-    "Copy caption",
-    "Open Instagram",
-    "Upload media",
-    "Paste caption",
-    "Publish",
-    "Paste live post URL",
-    "Add metrics"
-  ],
-  LinkedIn: [
-    "Copy post",
-    "Open LinkedIn",
-    "Create post",
-    "Add media if applicable",
-    "Publish",
-    "Paste live post URL",
-    "Add metrics"
-  ],
-  X: [
-    "Copy post",
-    "Open X",
-    "Create post/thread",
-    "Add media if applicable",
-    "Publish",
-    "Paste live post URL",
-    "Add metrics"
-  ],
-  TikTok: [
-    "Download video/media",
-    "Copy caption",
-    "Open TikTok",
-    "Upload video",
-    "Paste caption",
-    "Publish",
-    "Paste live post URL",
-    "Add metrics"
-  ]
-};
-
 type RepurposeSource = {
   type: "campaign" | "post";
   campaignId: string;
@@ -438,8 +638,45 @@ const storageKeys = {
   rejectedPosts: "scc.rejectedPosts",
   postQueue: "scc.postQueue",
   useApprovedPosts: "scc.useApprovedPosts",
-  socialConnections: "scc.socialConnections"
+  socialConnections: "scc.socialConnections",
+  inspirationPatterns: "scc.inspirationPatterns",
+  sourceInboxHistory: "scc.sourceInboxHistory",
+  opportunities: "scc.opportunities",
+  feedbackMemory: "scc.feedbackMemory",
+  useFeedbackMemory: "scc.useFeedbackMemory",
+  sourceCaptures: "scc.sourceCaptures",
+  activityLog: "scc.activityLog",
+  claimLibrary: "scc.claimLibrary",
+  reviewLinks: "scc.reviewLinks",
+  reviewFeedback: "scc.reviewFeedback",
+  weeklyPerformanceReportNotes: "scc.weeklyPerformanceReportNotes",
+  showDemoData: "scc.showDemoData"
 };
+
+const opportunityTypes: OpportunityType[] = [
+  "Trend",
+  "Mention / shoutout",
+  "Reply opportunity",
+  "Competitor post",
+  "News / article",
+  "Customer story",
+  "Founder thought",
+  "Sales note",
+  "Other"
+];
+
+const opportunityPlatforms: OpportunityPlatform[] = [
+  "X",
+  "LinkedIn",
+  "Instagram",
+  "TikTok",
+  "Website",
+  "Other"
+];
+
+const opportunityUrgencies: OpportunityUrgency[] = ["Low", "Medium", "High"];
+const opportunityStatuses: OpportunityStatus[] = ["New", "Reviewed", "Reply drafted", "Post drafted", "Queued", "Posted", "Archived"];
+
 
 const acceptedMediaTypes = [
   "image/png",
@@ -469,30 +706,36 @@ const acceptedKnowledgeDocumentTypes = [
   "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
 ];
 
-function readLocalValue<T>(key: string, fallback: T): T {
-  if (typeof window === "undefined") {
-    return fallback;
-  }
+const browserCaptureStorageKey = "scc-browser-capture";
 
-  try {
-    const value = window.localStorage.getItem(key);
-    return value ? (JSON.parse(value) as T) : fallback;
-  } catch {
-    return fallback;
-  }
-}
+const optionLabels = ["Option 1: Recommended", "Option 2: Shorter", "Option 3: More founder-led"];
 
-function writeLocalValue<T>(key: string, value: T) {
-  if (typeof window === "undefined") {
-    return;
+const simpleStyleOptions: { label: SimpleStyleChip; instruction: string }[] = [
+  {
+    label: "Conduit default",
+    instruction: "Use normal Conduit company voice: direct, practical, clear, and grounded in real operations."
+  },
+  {
+    label: "More founder-led",
+    instruction: "Make the post more direct, human, and founder-led, with less corporate polish."
+  },
+  {
+    label: "More technical",
+    instruction: "Make the post more precise, product/process-oriented, and specific about systems or workflow."
+  },
+  {
+    label: "Bolder",
+    instruction: "Use a stronger hook, more conviction, and a clearer point of view."
+  },
+  {
+    label: "More polished",
+    instruction: "Use a cleaner, company-safe tone while keeping it plainspoken."
+  },
+  {
+    label: "More concise",
+    instruction: "Make the output shorter, tighter, and easier to skim."
   }
-
-  try {
-    window.localStorage.setItem(key, JSON.stringify(value));
-  } catch {
-    // The app should still be usable if browser storage is blocked.
-  }
-}
+];
 
 function compactVoice(profile: BrandVoiceProfile) {
   return {
@@ -503,344 +746,8 @@ function compactVoice(profile: BrandVoiceProfile) {
   };
 }
 
-function createVoiceAnalysis(
-  source: Pick<VoiceSource, "name" | "type" | "platform" | "examples">
-): VoiceAnalysis {
-  const wordCount = source.examples.split(/\s+/).filter(Boolean).length;
-  const isFounder = source.type === "Founder";
-  const isCompany = source.type === "Company";
-  const isSocial = source.type === "Social Team";
-  const isShortForm = source.platform === "X" || source.platform === "TikTok";
-
-  return {
-    tone: isFounder
-      ? "Personal, opinionated, reflective, direct"
-      : isCompany
-        ? "Clear, useful, polished, credibility-building"
-        : isSocial
-          ? "Energetic, conversational, culture-aware, concise"
-          : "Specific, grounded, human, practical",
-    commonHooks: isShortForm
-      ? "Hot take:, POV:, Quick reminder:, The mistake is..."
-      : "One thing we noticed..., The best teams..., Here is the shift..., A practical way to think about it...",
-    commonPhrases:
-      wordCount > 35
-        ? "clear system, practical next step, useful signal, real workflow"
-        : "simple idea, sharper message, better rhythm, less friction",
-    sentenceStyle: isShortForm
-      ? "Short lines, fast turns, punchy standalone sentences."
-      : "Mix of medium-length explanation with crisp emphasis lines.",
-    avoid: isFounder
-      ? "Generic thought leadership, humblebrags, empty hustle language"
-      : "Vague claims, buzzwords, overexplaining, captions that sound templated",
-    bestUseCases:
-      source.type === "Recruiting"
-        ? "Hiring posts, team culture, candidate nurture, values-led briefs"
-        : source.type === "Customer Story"
-          ? "Case studies, proof points, transformation stories, sales enablement"
-          : `${source.name} works best for ${source.platform} briefs, launches, POV posts, and message testing.`
-  };
-}
-
 function countWords(value: string) {
   return value.split(/\s+/).filter(Boolean).length;
-}
-
-function countUrls(value: string) {
-  return value
-    .split(/\s+/)
-    .map((item) => item.trim())
-    .filter(Boolean).length;
-}
-
-function getUrlType(source: { urlType?: SourceUrlType }) {
-  return source.urlType ?? "Other";
-}
-
-function getSyncStatus(source: { syncStatus?: SyncStatus }) {
-  return source.syncStatus ?? "Manual Only";
-}
-
-function getLastChecked(source: { lastChecked?: string }) {
-  return source.lastChecked ?? "Never";
-}
-
-function currentCheckedAt() {
-  return new Intl.DateTimeFormat("en", {
-    month: "short",
-    day: "numeric",
-    hour: "numeric",
-    minute: "2-digit"
-  }).format(new Date());
-}
-
-function hasStoredUrls(value?: string) {
-  return countUrls(value ?? "") > 0;
-}
-
-function voiceSyncReadinessMessage(source: {
-  urlType?: SourceUrlType;
-  platform?: VoiceSourcePlatform;
-}) {
-  const urlType = getUrlType(source);
-
-  if (urlType === "Social Profile URL" && source.platform === "X") {
-    return "Ready for future X API sync. For now, paste example posts manually.";
-  }
-
-  if (urlType === "Social Profile URL" && source.platform === "LinkedIn") {
-    return "LinkedIn post syncing requires approved LinkedIn API access. For now, paste example posts manually.";
-  }
-
-  if (urlType === "Website URL") {
-    return "Website fetching can be added next. For now, paste page copy manually.";
-  }
-
-  if (urlType === "Document URL") {
-    return "Document import can be added later. For now, paste useful excerpts manually.";
-  }
-
-  if (urlType === "Social Post URL") {
-    return "Individual post syncing can be added later. For now, paste the post text manually.";
-  }
-
-  return "Manual reference only for now. Paste example posts manually.";
-}
-
-function librarySyncReadinessMessage(source: {
-  urlType?: SourceUrlType;
-  platform?: LibrarySourcePlatform;
-  category?: LibrarySourceCategory;
-}) {
-  const urlType = getUrlType(source);
-  const isWebsiteOrBlog =
-    urlType === "Website URL" ||
-    source.platform === "Website" ||
-    source.category === "Website" ||
-    source.category === "Blog";
-  const isSocial =
-    urlType === "Social Profile URL" ||
-    urlType === "Social Post URL" ||
-    source.platform === "LinkedIn" ||
-    source.platform === "X" ||
-    source.platform === "Instagram" ||
-    source.platform === "TikTok" ||
-    source.category === "Founder Social" ||
-    source.category === "Company Social";
-
-  if (isWebsiteOrBlog) {
-    return "Can be fetched later. For now, paste website or blog copy manually.";
-  }
-
-  if (isSocial) {
-    return "Needs platform API access. For now, paste social content manually.";
-  }
-
-  if (urlType === "Document URL" || source.platform === "Document") {
-    return "Needs document import later. For now, paste document excerpts manually.";
-  }
-
-  return "Manual reference only for now. Paste source content manually.";
-}
-
-function looksLikeUrl(value?: string) {
-  const text = (value ?? "").trim().toLowerCase();
-  return (
-    text.startsWith("http://") ||
-    text.startsWith("https://") ||
-    text.startsWith("www.") ||
-    text.includes("linkedin.com/") ||
-    text.includes("x.com/") ||
-    text.includes("twitter.com/")
-  );
-}
-
-function looksLikeGenericRawIdea(value?: string) {
-  const normalized = (value ?? "").trim().toLowerCase().replace(/\s+/g, " ");
-  if (!normalized) {
-    return true;
-  }
-
-  const genericIdeas = [
-    legacyGenericIdea.toLowerCase(),
-    rawIdeaPlaceholder.toLowerCase(),
-    "write a social post",
-    "create a brief",
-    "make a post",
-    "generate posts",
-    "turn this into content",
-    "content creation",
-    "brand voice",
-    "marketing workflow",
-    "platform-ready social posts",
-    "why it matters",
-    "what the audience should take away",
-    "product workflow launch",
-    "brand voice consistent"
-  ];
-
-  return normalized.length < 24 || genericIdeas.some((item) => normalized.includes(item));
-}
-
-function looksLikeGenericIntent(value?: string) {
-  const normalized = (value ?? "").trim().toLowerCase().replace(/\s+/g, " ");
-  if (!normalized) {
-    return true;
-  }
-
-  const genericIntent = [
-    "describe what happened",
-    "why it matters",
-    "what the audience should take away",
-    "write a post",
-    "make content",
-    "create a social post",
-    "product workflow launch",
-    "brand voice consistent"
-  ];
-
-  return normalized.length < 36 || genericIntent.some((item) => normalized.includes(item));
-}
-
-function genericLanguageWarnings(values: string[]) {
-  const text = values.join(" ").toLowerCase();
-  return [
-    "Describe what happened",
-    "why it matters",
-    "what the audience should take away",
-    "product workflow launch",
-    "brand voice consistent"
-  ].filter((phrase) => text.includes(phrase.toLowerCase()));
-}
-
-function looksLikeVagueMediaNotes(value?: string) {
-  const normalized = (value ?? "").trim().toLowerCase().replace(/\s+/g, " ");
-  if (!normalized) {
-    return true;
-  }
-
-  return (
-    normalized.length < 30 ||
-    ["photo", "image", "video", "audio", "screenshot", "post about this"].includes(
-      normalized
-    )
-  );
-}
-
-function cleanVoiceSourceName(value?: string) {
-  if (!value || looksLikeUrl(value)) {
-    return "Unnamed Voice Source";
-  }
-
-  return value;
-}
-
-function profileUrlValues(profile: Pick<
-  Profile,
-  "linkedInUrl" | "xUrl" | "instagramUrl" | "tiktokUrl" | "websiteUrl" | "otherUrls"
->) {
-  return [
-    profile.linkedInUrl,
-    profile.xUrl,
-    profile.instagramUrl,
-    profile.tiktokUrl,
-    profile.websiteUrl,
-    ...profile.otherUrls.split(/\s+/)
-  ].filter((value) => value.trim());
-}
-
-function countProfileUrls(profile: Pick<
-  Profile,
-  "linkedInUrl" | "xUrl" | "instagramUrl" | "tiktokUrl" | "websiteUrl" | "otherUrls"
->) {
-  return profileUrlValues(profile).length;
-}
-
-function profileUrlsText(profile: Pick<
-  Profile,
-  "linkedInUrl" | "xUrl" | "instagramUrl" | "tiktokUrl" | "websiteUrl" | "otherUrls"
->) {
-  return profileUrlValues(profile).join("\n");
-}
-
-function hasLinkedInOrXProfileUrl(profile: Pick<Profile, "linkedInUrl" | "xUrl" | "otherUrls">) {
-  return Boolean(profile.linkedInUrl || profile.xUrl || /linkedin\.com|x\.com|twitter\.com/i.test(profile.otherUrls));
-}
-
-function hasWebsiteProfileUrl(profile: Pick<Profile, "websiteUrl" | "otherUrls">) {
-  return Boolean(profile.websiteUrl || /https?:\/\/(?!.*(?:linkedin\.com|x\.com|twitter\.com))/i.test(profile.otherUrls));
-}
-
-function hasLinkedInOrXSourceUrl(source: Pick<LibrarySource, "urls" | "platform">) {
-  return source.platform === "LinkedIn" || source.platform === "X" || /linkedin\.com|x\.com|twitter\.com/i.test(source.urls);
-}
-
-function hasWebsiteSourceUrl(source: Pick<LibrarySource, "urls" | "platform" | "category">) {
-  return source.platform === "Website" || source.category === "Website" || source.category === "Blog" || /https?:\/\/(?!.*(?:linkedin\.com|x\.com|twitter\.com))/i.test(source.urls);
-}
-
-function extractUrls(value: string) {
-  return value
-    .split(/[\s,]+/)
-    .map((item) => item.trim())
-    .filter(Boolean);
-}
-
-function isSocialUrl(value: string) {
-  try {
-    const url = new URL(/^https?:\/\//i.test(value) ? value : `https://${value}`);
-    const host = url.hostname.toLowerCase().replace(/^www\./, "");
-    return [
-      "linkedin.com",
-      "x.com",
-      "twitter.com",
-      "instagram.com",
-      "tiktok.com",
-      "facebook.com",
-      "fb.com",
-      "youtube.com",
-      "youtu.be"
-    ].some((domain) => host === domain || host.endsWith(`.${domain}`));
-  } catch {
-    return false;
-  }
-}
-
-function firstWebsiteUrl(value: string) {
-  return extractUrls(value).find((item) => /\./.test(item) && !isSocialUrl(item));
-}
-
-function mediaTypeFromFile(file: File): CampaignMediaContext["type"] | undefined {
-  if (file.type.startsWith("image/")) {
-    return "image";
-  }
-
-  if (file.type.startsWith("video/")) {
-    return "video";
-  }
-
-  if (file.type.startsWith("audio/")) {
-    return "audio";
-  }
-
-  return undefined;
-}
-
-function inferMediaKindFromUrl(url: string): CampaignMediaContext["type"] | undefined {
-  const lower = url.toLowerCase().split("?")[0] ?? "";
-  if (/\.(png|jpe?g|webp)$/.test(lower)) return "image";
-  if (/\.(mp4|mov|webm)$/.test(lower)) return "video";
-  if (/\.(mp3|wav|m4a)$/.test(lower)) return "audio";
-  return undefined;
-}
-
-function readFileAsDataUrl(file: File) {
-  return new Promise<string>((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => resolve(String(reader.result ?? ""));
-    reader.onerror = () => reject(reader.error);
-    reader.readAsDataURL(file);
-  });
 }
 
 const maxAiImageUploadBytes = 2_500_000;
@@ -878,49 +785,24 @@ function createMockMediaAnalysis(media?: CampaignMediaContext) {
   };
 }
 
-function createPersonalitySummary(
-  profile: Pick<Profile, "name" | "type" | "role" | "bio" | "examples" | "notes">
-) {
-  const words = countWords(`${profile.bio} ${profile.examples} ${profile.notes}`);
-  const isPerson =
-    profile.type === "Founder" ||
-    profile.type === "Team Member" ||
-    profile.type === "Internal Voice";
-  const isCompany = profile.type === "Company Account";
-  const isInspiration =
-    profile.type === "Inspiration / Reference" ||
-    profile.type === "Competitor / Market Watch";
+function inspirationPatternSummary(pattern: InspirationPattern) {
+  return pattern.analysis?.hookPattern || pattern.notes || pattern.pastedText || pattern.fetchedContent || "Saved pattern. Add notes, pasted text, screenshot, or a public webpage to analyze.";
+}
 
-  return {
-    voiceTraits: isInspiration
-      ? "Use as pattern inspiration only, not as a voice to copy"
-      : isPerson
-      ? "Personal, specific, opinionated, experience-led"
-      : isCompany
-        ? "Clear, credible, useful, product-aware"
-        : "Adaptable, practical, grounded, audience-aware",
-    commonTopics: isCompany
-      ? "Product value, customer pain, proof points, market education"
-      : "Lessons learned, category POV, operating decisions, practical advice",
-    commonHooks:
-      words > 40
-        ? "One thing I have learned..., The pattern we keep seeing..., Here is the practical version..."
-        : "Quick take:, A useful way to think about this:, The mistake most teams make...",
-    sentenceStyle: isPerson
-      ? "Mix of short conviction lines with a few reflective explanations."
-      : "Structured, scannable, benefit-led sentences with clear takeaways.",
-    repeatedPhrases:
-      words > 40
-        ? "clear workflow, useful signal, practical next step, stronger message"
-        : "simple system, sharper posts, better inputs, less guesswork",
-    avoid: "Generic claims, invented proof, over-polished language, platform cliches",
-    bestPlatforms: isCompany
-      ? "LinkedIn, Instagram, X"
-      : "LinkedIn, X, TikTok",
-    bestUseCases: isInspiration
-      ? `${profile.name || "This profile"} works best for studying structure, format, hooks, and creative patterns without copying wording or facts.`
-      : `${profile.name || "This profile"} works best for ${profile.role || profile.type} POV posts, launch content, education, and campaign drafts.`
-  };
+function compactPatternTags(pattern: InspirationPattern) {
+  return pattern.tags.length > 0 ? pattern.tags.slice(0, 3).join(", ") : "No tags";
+}
+
+function analyzedInternalSourceCount(profile?: Pick<Profile, "voiceSources">) {
+  return analyzedProfileSources(profile).filter((source) =>
+    source.sourceType === "internal voice" || source.sourceType === "company account"
+  ).length;
+}
+
+function analyzedInspirationSourceCount(profile?: Pick<Profile, "voiceSources">) {
+  return analyzedProfileSources(profile).filter((source) =>
+    source.sourceType === "inspiration/reference" || source.sourceType === "competitor/market watch"
+  ).length;
 }
 
 function clearAppLocalStorage() {
@@ -953,25 +835,6 @@ function persistLocalApprovedFallback(items: ApprovedPostMemory[]) {
   writeLocalValue(storageKeys.approvedPosts, mergeById(items, existing));
 }
 
-function isInspirationProfile(profile: Profile) {
-  return (
-    profile.type === "Inspiration / Reference" ||
-    profile.type === "Competitor / Market Watch"
-  );
-}
-
-function isInternalVoiceProfile(profile: Profile) {
-  return !isInspirationProfile(profile) && profile.type !== "Customer / Audience Persona";
-}
-
-function findDefaultPostingAccount(profiles: Profile[]) {
-  return (
-    profiles.find((profile) => profile.name.toLowerCase().includes("conduit")) ??
-    profiles.find((profile) => profile.type === "Company Account") ??
-    profiles[0]
-  );
-}
-
 function createLibrarySourceAnalysis(
   source: Pick<LibrarySource, "name" | "category" | "platform" | "urls" | "content" | "notes">
 ): LibrarySourceAnalysis {
@@ -982,14 +845,24 @@ function createLibrarySourceAnalysis(
     source.category === "Founder Social" || source.category === "Company Social";
   const isProof =
     source.category === "Customer Story" || source.category === "Investor";
+  const isTranscript = isTranscriptSourceCategory(source.category);
+  const transcriptLines = source.content
+    .split(/\n+/)
+    .map((line) => line.trim())
+    .filter((line) => line.length > 20)
+    .slice(0, 6);
 
   return {
-    voiceTraits: isSocial
+    voiceTraits: isTranscript
+      ? "Raw, conversational, source-close, useful for founder language and customer pain"
+      : isSocial
       ? "Conversational, timely, opinion-aware, easy to adapt"
       : isWebsite
         ? "Clear, structured, benefit-led, product-specific"
         : "Grounded, specific, useful, context-rich",
-    commonTopics: isProof
+    commonTopics: isTranscript
+      ? "Meeting themes, product framing, customer pain, founder phrasing, strategy notes"
+      : isProof
       ? "Outcomes, proof, credibility, change over time"
       : isWebsite
         ? "Positioning, product value, workflow, customer pain points"
@@ -1001,12 +874,87 @@ function createLibrarySourceAnalysis(
     strongHooks: hasUrls
       ? "The page says..., The clearest promise is..., The proof point worth reusing is..."
       : "A sharper way to say this..., The useful angle is..., Start with the problem...",
-    proofPoints: isProof
+    proofPoints: isTranscript
+      ? "Candidate proof points should be reviewed before posting publicly."
+      : isProof
       ? "Customer outcomes, investor narrative, before-and-after evidence"
       : "URLs saved for reference, pasted copy, recurring claims, source notes",
     avoid:
-      "Inventing claims not present in the source, scraping URLs, overstating proof, generic filler",
-    bestUseCases: `${source.name} is best for ${source.category.toLowerCase()} context, ${source.platform.toLowerCase()} adaptation, campaign briefs, and post substantiation.`
+      isTranscript
+        ? "Publishing sensitive customer/account details, private strategy, unapproved metrics, or raw quotes without review"
+        : "Inventing claims not present in the source, scraping URLs, overstating proof, generic filler",
+    bestUseCases: isTranscript
+      ? `${source.name} is best for internal language mining, customer pain discovery, product framing, and reviewed Conduit Brain themes.`
+      : `${source.name} is best for ${source.category.toLowerCase()} context, ${source.platform.toLowerCase()} adaptation, campaign briefs, and post substantiation.`,
+    keyThemes: isTranscript
+      ? uniqueStrings([
+          source.category.replace(" / ", " "),
+          ...transcriptLines.map((line) => truncateText(line, 80))
+        ]).slice(0, 5)
+      : undefined,
+    usefulPhrases: isTranscript
+      ? transcriptLines.slice(0, 4)
+      : undefined,
+    customerPainPoints: isTranscript
+      ? transcriptLines
+          .filter((line) => /pain|problem|hard|slow|manual|stuck|customer|factory|workflow/i.test(line))
+          .slice(0, 4)
+      : undefined,
+    productClaims: isTranscript
+      ? ["Review before public use. Keep only claims supported by Company Knowledge."]
+      : undefined,
+    founderVoiceExamples: isTranscript
+      ? transcriptLines.filter((line) => /we |i |our |conduit/i.test(line)).slice(0, 4)
+      : undefined,
+    postIdeas: isTranscript
+      ? [
+          "Turn one customer pain into a founder-led LinkedIn post.",
+          "Use one specific product framing line as the hook.",
+          "Convert a useful meeting insight into a practical industry POV."
+        ]
+      : undefined,
+    safetyNotes: isTranscript
+      ? [
+          "Needs review before automatic generation.",
+          "Remove sensitive customer, account, facility, or private strategy details before posting."
+        ]
+      : undefined
+  };
+}
+
+function transcriptAnalysisToLibraryAnalysis(
+  analysis: Record<string, unknown>,
+  source: Pick<LibrarySource, "name" | "category" | "platform" | "urls" | "content" | "notes">
+): LibrarySourceAnalysis {
+  const fallback = createLibrarySourceAnalysis(source);
+  const keyThemes = arrayFromUnknown(analysis.keyThemes);
+  const usefulPhrases = arrayFromUnknown(analysis.usefulPhrases);
+  const customerPainPoints = arrayFromUnknown(analysis.customerPainPoints);
+  const productClaims = arrayFromUnknown(analysis.productClaims);
+  const founderVoiceExamples = arrayFromUnknown(analysis.founderVoiceExamples);
+  const proofPoints = arrayFromUnknown(analysis.proofPoints);
+  const postIdeas = arrayFromUnknown(analysis.postIdeas);
+  const safetyNotes = arrayFromUnknown(analysis.safetyNotes);
+
+  return {
+    ...fallback,
+    voiceTraits: founderVoiceExamples.length > 0
+      ? "Founder-close, conversational, specific, review before publishing"
+      : fallback.voiceTraits,
+    commonTopics: keyThemes.length > 0 ? keyThemes.join(", ") : fallback.commonTopics,
+    repeatedPhrases: usefulPhrases.length > 0 ? usefulPhrases.slice(0, 5).join(", ") : fallback.repeatedPhrases,
+    proofPoints: proofPoints.length > 0 ? proofPoints.join(", ") : fallback.proofPoints,
+    avoid: safetyNotes.length > 0 ? safetyNotes.join(", ") : fallback.avoid,
+    bestUseCases: postIdeas.length > 0
+      ? `Use for: ${postIdeas.slice(0, 3).join("; ")}`
+      : fallback.bestUseCases,
+    keyThemes: keyThemes.length > 0 ? keyThemes : fallback.keyThemes,
+    usefulPhrases: usefulPhrases.length > 0 ? usefulPhrases : fallback.usefulPhrases,
+    customerPainPoints: customerPainPoints.length > 0 ? customerPainPoints : fallback.customerPainPoints,
+    productClaims: productClaims.length > 0 ? productClaims : fallback.productClaims,
+    founderVoiceExamples: founderVoiceExamples.length > 0 ? founderVoiceExamples : fallback.founderVoiceExamples,
+    postIdeas: postIdeas.length > 0 ? postIdeas : fallback.postIdeas,
+    safetyNotes: safetyNotes.length > 0 ? safetyNotes : fallback.safetyNotes
   };
 }
 
@@ -1020,7 +968,7 @@ function librarySourceBrief(sources: LibrarySource[]) {
     };
   }
 
-  const names = sources.map((source) => source.name);
+  const names = sources.map(getLibrarySourceDisplayName);
   const topics = sources
     .map((source) => source.analysis.commonTopics.split(",")[0])
     .slice(0, 3)
@@ -1035,56 +983,6 @@ function librarySourceBrief(sources: LibrarySource[]) {
       .slice(0, 2)
       .join(" + ")
   };
-}
-
-function sourceFlavor(source?: VoiceSource) {
-  if (!source) {
-    return {
-      angle: "brand-consistent",
-      proof: "voice profile",
-      instruction: "Keep the post clear, useful, and easy to edit."
-    };
-  }
-
-  const flavors: Record<VoiceSourceType, { angle: string; proof: string; instruction: string }> = {
-    Founder: {
-      angle: "founder POV",
-      proof: "personal conviction",
-      instruction: "Make it sound like a founder explaining the problem from experience."
-    },
-    Company: {
-      angle: "company narrative",
-      proof: "product clarity",
-      instruction: "Keep it polished, concrete, and useful without sounding corporate."
-    },
-    "Social Team": {
-      angle: "social-first caption",
-      proof: "platform fluency",
-      instruction: "Make it quicker, more conversational, and easy to adapt."
-    },
-    "Customer Story": {
-      angle: "customer transformation",
-      proof: "before-and-after detail",
-      instruction: "Frame the post around the user problem and the shift after solving it."
-    },
-    Investor: {
-      angle: "market insight",
-      proof: "category signal",
-      instruction: "Make it analytical, confident, and tied to a broader market shift."
-    },
-    Recruiting: {
-      angle: "team-building story",
-      proof: "culture signal",
-      instruction: "Make it human, values-led, and candidate-friendly."
-    },
-    Other: {
-      angle: "specialized voice",
-      proof: "source examples",
-      instruction: "Borrow the source rhythm while keeping the message clear."
-    }
-  };
-
-  return flavors[source.type];
 }
 
 const conduitBannedTerms = [
@@ -1150,7 +1048,8 @@ function createMockPosts(
   approvedExamples: ApprovedPostMemory[] = [],
   campaignTemplate?: CampaignTemplate,
   simpleStyles: SimpleStyleChip[] = [],
-  simpleStyleInstructions: string[] = []
+  simpleStyleInstructions: string[] = [],
+  feedbackSummary?: FeedbackMemorySummary
 ): GeneratedPost[] {
   const voice = compactVoice(brandRules);
   const profileName = selectedProfile?.name ?? "General Profile";
@@ -1178,6 +1077,10 @@ function createMockPosts(
   const concise = simpleStyles.includes("More concise");
   const bold = simpleStyles.includes("Bolder");
   const technical = simpleStyles.includes("More technical");
+  const feedbackPreferences = feedbackSummary?.enabled ? feedbackSummary.topPreferences.join(" ").toLowerCase() : "";
+  const avoidHashtags = feedbackPreferences.includes("hashtag");
+  const preferShorter = feedbackPreferences.includes("shorter") || feedbackPreferences.includes("concise");
+  const preferFactorySpecific = feedbackPreferences.includes("factory") || feedbackPreferences.includes("operational");
   const supportLine =
     librarySources.length > 0
       ? ` It connects to ${libraryBrief.angle.toLowerCase()} without turning into a generic pitch.`
@@ -1186,11 +1089,11 @@ function createMockPosts(
     profileType === "Company Account"
       ? `${profileName} is sharing this because`
       : `I keep coming back to this because`;
-  const linkedinCopy = concise
+  const linkedinCopy = concise || preferShorter
     ? `${bold ? "The useful signal is specific:" : "Quick thought:"} ${intent}\n\n${mediaPhrase ? `${capitalizeFirst(mediaPhrase)} makes it concrete.` : proofLine}\n\nBuild closer to the real workflow. That is where the constraints show up first.`
     : `${profileLead} ${bold ? "automation breaks when it is designed too far from the floor" : "the best automation work starts close to the real operation"}.\n\n${intent}\n\n${mediaPhrase ? `You can see it in ${mediaPhrase}: the useful details are in the handoffs, notes, hardware, and constraints around the work.` : `The useful signal here is ${proofLine}.`}${supportLine}\n\n${technical ? "The process detail matters because the system has to fit the machines, people, exceptions, and handoffs already in motion." : "The takeaway: stay close enough to the work to build around what actually happens, not what the slide says happens."}`;
   const xCopy = `${bold ? "Useful signal:" : "The point:"} ${intent}\n\n${mediaPhrase ? `${capitalizeFirst(mediaPhrase)} is the reminder: ` : ""}${technical ? "workflow details matter more than the pitch." : "real operations expose the constraints generic tools miss."}`;
-  const instagramCopy = `${mediaPhrase ? `${capitalizeFirst(mediaPhrase)} tells the story.` : intent}\n\n${mediaNote ? `What it shows: ${mediaNote}` : `A closer look at ${contentAngle.toLowerCase()}.`}\n\nThe point is not polish. It is staying close enough to the real process to build something useful.\n\n${platformHasUsefulHashtags("Instagram") ? "#manufacturing #automation #industrialtech" : ""}`.trim();
+  const instagramCopy = `${mediaPhrase ? `${capitalizeFirst(mediaPhrase)} tells the story.` : intent}\n\n${mediaNote ? `What it shows: ${mediaNote}` : `A closer look at ${contentAngle.toLowerCase()}.`}\n\nThe point is not polish. It is staying close enough to the real process to build something useful.\n\n${platformHasUsefulHashtags("Instagram") && !avoidHashtags ? "#manufacturing #automation #industrialtech" : ""}`.trim();
   const tiktokCopy = `Hook: ${bold ? "Most automation misses this part." : "This is where automation work gets real."}\n\nShort script:\n1. Start on ${mediaPhrase || "the uploaded media"}.\n2. Point out the operational detail most people would skip.\n3. Explain why it matters: ${intent}.\n4. Close on the practical takeaway: build around the real workflow.\n\nCaption: ${intent}`;
   const templates: Record<Platform, string> = {
     LinkedIn: linkedinCopy,
@@ -1208,7 +1111,7 @@ function createMockPosts(
     mediaUsed: Boolean(mediaContext?.filename || mediaContext?.notes),
     postCopy: sanitizeConduitCopy(templates[platform]),
     content: sanitizeConduitCopy(templates[platform]),
-    rationale: `Mock draft shaped for ${platform}. ${influenceLine} Used the ${contentAngle} angle, brief intent, Company Knowledge around ${knowledgePhrase}, and available media/context. ${approvedCadence}${templateLine}${styleLine}`,
+    rationale: `Mock draft shaped for ${platform}. ${influenceLine} Used the ${contentAngle} angle, brief intent, Company Knowledge around ${knowledgePhrase}, and available media/context. ${approvedCadence}${templateLine}${styleLine}${feedbackSummary?.enabled && feedbackSummary.topPreferences.length > 0 ? ` Applied Feedback Memory: ${feedbackSummary.topPreferences.slice(0, 2).join("; ")}.` : ""}${preferFactorySpecific ? " Added extra operational specificity." : ""}`,
     recommendedMediaUse:
       mediaContext?.filename || mediaContext?.notes
         ? "Use the media as the proof point and connect the opening line to what the audience can see or hear."
@@ -1223,7 +1126,7 @@ function createMockPosts(
         ? ""
         : "Save this if the takeaway is useful for your team.",
     hashtags:
-      platform === "Instagram" || platform === "TikTok"
+      !avoidHashtags && (platform === "Instagram" || platform === "TikTok")
         ? ["#automation", "#manufacturing", "#buildinpublic"]
         : [],
     firstComment:
@@ -1402,11 +1305,90 @@ function demoKnowledgeBase(): LibrarySource[] {
   }));
 }
 
+function demoClaimLibrary(sources: LibrarySource[]): ClaimLibraryItem[] {
+  const now = new Date().toISOString();
+  const source = sources[0];
+  const sourceName = source ? getLibrarySourceDisplayName(source) : undefined;
+  const buildClaim = (
+    id: string,
+    claimText: string,
+    claimType: ClaimType,
+    riskLevel: ClaimRiskLevel,
+    notes: string
+  ): ClaimLibraryItem => ({
+    id,
+    claimText,
+    claimType,
+    supportingSourceId: source?.id,
+    supportingSourceName: sourceName,
+    sourceType: "manual entry",
+    notes,
+    riskLevel,
+    reviewedBy: claimType === "Approved claim" ? "Demo workspace" : "",
+    reviewedAt: claimType === "Approved claim" ? now : undefined,
+    metadata: { demo: true },
+    createdAt: now,
+    updatedAt: now
+  });
+
+  return [
+    buildClaim(
+      "demo-claim-faster-workflows",
+      "Conduit helps manufacturers deploy automation workflows faster.",
+      "Approved claim",
+      "Low",
+      "Demo approved claim for practical deployment-speed framing."
+    ),
+    buildClaim(
+      "demo-claim-operating-layer",
+      "Conduit connects robots, machines, sensors, and operational workflows into one operating layer.",
+      "Approved claim",
+      "Low",
+      "Demo approved claim for product architecture framing."
+    ),
+    buildClaim(
+      "demo-claim-one-day",
+      "Conduit can deploy automation in one day.",
+      "Needs review",
+      "High",
+      "Needs a source-backed deployment timeline before public use."
+    ),
+    buildClaim(
+      "demo-claim-replaces-integrators",
+      "Conduit replaces system integrators.",
+      "Needs review",
+      "High",
+      "Potentially too broad. Review nuance before use."
+    ),
+    buildClaim(
+      "demo-claim-guarantees",
+      "Conduit guarantees automation outcomes.",
+      "Do not say",
+      "High",
+      "Guarantees are not approved for public claims."
+    ),
+    buildClaim(
+      "demo-claim-eliminates-humans",
+      "Conduit eliminates the need for all human operators.",
+      "Do not say",
+      "High",
+      "Avoid replacing-operators language."
+    ),
+    buildClaim(
+      "demo-claim-every-workflow",
+      "Conduit can automate every factory workflow immediately.",
+      "Do not say",
+      "High",
+      "Overbroad and unsupported."
+    )
+  ];
+}
+
 function demoCampaign(profiles: Profile[], sources: LibrarySource[]): Campaign {
   const danny = profiles.find((profile) => profile.id === "demo-profile-danny");
   const conduit = profiles.find((profile) => profile.id === "demo-profile-conduit");
   const sourceIds = sources.map((source) => source.id);
-  const sourceNames = sources.map((source) => source.name);
+  const sourceNames = sources.map(getLibrarySourceDisplayName);
   const posts = createMockPosts(
     "Demo - Office Workshop Build-in-Public",
     "Show that Conduit is being built close to hardware, factories, and real industrial operations.",
@@ -1705,21 +1687,6 @@ function postsFromAiResponse(
   });
 }
 
-function withTimeout<T>(promise: Promise<T>, timeoutMs: number, message: string): Promise<T> {
-  return new Promise((resolve, reject) => {
-    const timeoutId = window.setTimeout(() => reject(new Error(message)), timeoutMs);
-    promise
-      .then((value) => {
-        window.clearTimeout(timeoutId);
-        resolve(value);
-      })
-      .catch((error) => {
-        window.clearTimeout(timeoutId);
-        reject(error);
-      });
-  });
-}
-
 function imageDataUrlForGeneration(mediaContext: CampaignMediaContext | undefined, imageDataUrl: string) {
   // Image vision is handled by /api/analyze-media when the file is uploaded.
   // Keep /api/generate lightweight so larger photos cannot trigger a 413 response.
@@ -1728,25 +1695,11 @@ function imageDataUrlForGeneration(mediaContext: CampaignMediaContext | undefine
   return undefined;
 }
 
-async function readJsonResponse(response: Response, fallbackMessage: string) {
-  const text = await response.text();
-  if (!text.trim()) {
-    return {};
-  }
-
-  try {
-    return JSON.parse(text);
-  } catch {
-    if (response.status === 413 || /request entity too large|payload too large/i.test(text)) {
-      throw new Error("The uploaded image is too large to send for AI generation. Use mock fallback, add media notes, or upload a smaller image.");
-    }
-
-    throw new Error(`${fallbackMessage}: ${text.slice(0, 120)}`);
-  }
-}
-
 export function SocialCommandCenter() {
   const [screen, setScreen] = useState<Screen>("Dashboard");
+  const [sourceInboxInitialView, setSourceInboxInitialView] = useState<"Classify Source" | "Browser Captures" | "Import Past Content" | "History">("Classify Source");
+  const [reviewQueueFilterPreset, setReviewQueueFilterPreset] =
+    useState<ReviewQueueFilter>("All drafts");
   const [campaigns, setCampaigns] = useState<Campaign[]>(initialCampaigns);
   const [activeCampaignId, setActiveCampaignId] = useState(
     initialCampaigns[0]?.id ?? ""
@@ -1773,20 +1726,30 @@ export function SocialCommandCenter() {
   const [rejectedPosts, setRejectedPosts] = useState<RejectedPostMemory[]>([]);
   const [postQueue, setPostQueue] = useState<PostQueueItem[]>([]);
   const [useApprovedPosts, setUseApprovedPosts] = useState(true);
-  const [voiceSources, setVoiceSources] =
-    useState<VoiceSource[]>(initialVoiceSources);
   const [librarySources, setLibrarySources] =
     useState<LibrarySource[]>(initialLibrarySources);
   const [mediaAssets, setMediaAssets] = useState<MediaAsset[]>([]);
   const [socialConnections, setSocialConnections] = useState<SocialConnection[]>([]);
+  const [inspirationPatterns, setInspirationPatterns] = useState<InspirationPattern[]>([]);
+  const [sourceInboxHistory, setSourceInboxHistory] = useState<SourceInboxHistoryItem[]>([]);
+  const [sourceCaptures, setSourceCaptures] = useState<SourceCapture[]>([]);
+  const [opportunities, setOpportunities] = useState<Opportunity[]>([]);
+  const [feedbackMemory, setFeedbackMemory] = useState<FeedbackMemoryItem[]>([]);
+  const [activityLog, setActivityLog] = useState<ActivityLogItem[]>([]);
+  const [claimLibrary, setClaimLibrary] = useState<ClaimLibraryItem[]>([]);
+  const [reviewLinks, setReviewLinks] = useState<ReviewLink[]>([]);
+  const [reviewFeedback, setReviewFeedback] = useState<ReviewFeedback[]>([]);
+  const [useFeedbackMemory, setUseFeedbackMemory] = useState(true);
+  const [showDemoData, setShowDemoData] = useState(true);
   const [selectedLibrarySourceIds, setSelectedLibrarySourceIds] = useState<string[]>(
     initialLibrarySources[0] ? [initialLibrarySources[0].id] : []
   );
   const [selectedProfileId, setSelectedProfileId] = useState(
-    initialProfiles[0]?.id ?? ""
+    findDefaultPostingAccount(initialProfiles)?.id ?? ""
   );
   const [selectedVoiceInfluenceIds, setSelectedVoiceInfluenceIds] = useState<string[]>([]);
   const [selectedInspirationProfileIds, setSelectedInspirationProfileIds] = useState<string[]>([]);
+  const [activeOpportunityContext, setActiveOpportunityContext] = useState<{ id: string; title: string } | null>(null);
   const [generationError, setGenerationError] = useState("");
   const [generationNotice, setGenerationNotice] = useState("");
   const [queueDebugMessage, setQueueDebugMessage] = useState("");
@@ -1826,169 +1789,238 @@ export function SocialCommandCenter() {
   const [authLoading, setAuthLoading] = useState(appUsesSupabase());
   const [authUserEmail, setAuthUserEmail] = useState("");
   const [workspace, setWorkspace] = useState<WorkspaceContext | null>(null);
+  const [workspaceConnectionError, setWorkspaceConnectionError] = useState("");
+  const [workspaceConnectionAttempt, setWorkspaceConnectionAttempt] = useState(0);
+  const [commandBarOpen, setCommandBarOpen] = useState(false);
 
   useEffect(() => {
-    let cancelled = false;
-    let authFallbackTimer: number | undefined;
+    if (typeof window === "undefined") return;
+    const searchParams = new URLSearchParams(window.location.search);
+    if (window.sessionStorage.getItem(browserCaptureStorageKey) || searchParams.get("capture")) {
+      setScreen("Source Inbox");
+    }
+  }, []);
 
-    function loadLocalData() {
-      if (authFallbackTimer) {
-        window.clearTimeout(authFallbackTimer);
-      }
-      const savedCampaigns = readLocalValue<Campaign[]>(
-        storageKeys.campaigns,
-        initialCampaigns
-      );
-      const savedActiveId = readLocalValue<string>(
-        storageKeys.activeCampaignId,
-        savedCampaigns[0]?.id ?? initialCampaigns[0]?.id ?? ""
-      );
+  function loadLocalData(reason = "Local browser mode is active. Shared workspace data was not changed.") {
+    const savedCampaigns = readLocalValue<Campaign[]>(
+      storageKeys.campaigns,
+      initialCampaigns
+    );
+    const savedActiveId = readLocalValue<string>(
+      storageKeys.activeCampaignId,
+      savedCampaigns[0]?.id ?? initialCampaigns[0]?.id ?? ""
+    );
 
-      setCampaigns(savedCampaigns);
-      setActiveCampaignId(
-        savedCampaigns.some((campaign) => campaign.id === savedActiveId)
-          ? savedActiveId
-          : savedCampaigns[0]?.id ?? initialCampaigns[0]?.id ?? ""
-      );
-      setUploadText(readLocalValue(storageKeys.pastPosts, defaultPastPosts));
-      setBrandVoice(readLocalValue(storageKeys.brandVoice, defaultBrandVoice));
-      const savedProfiles = readLocalValue<Profile[]>(
-        storageKeys.profiles,
-        initialProfiles
-      );
-      setProfiles(savedProfiles);
-      setSelectedProfileId(findDefaultPostingAccount(savedProfiles)?.id ?? savedProfiles[0]?.id ?? "");
-      const savedVoiceSources = readLocalValue<VoiceSource[]>(
-        storageKeys.voiceSources,
-        initialVoiceSources
-      );
-      setVoiceSources(savedVoiceSources);
-      const savedLibrarySources = readLocalValue<LibrarySource[]>(
-        storageKeys.librarySources,
-        initialLibrarySources
-      );
-      setLibrarySources(savedLibrarySources);
-      setMediaAssets(readLocalValue<MediaAsset[]>(storageKeys.mediaAssets, []));
-      setSocialConnections(readLocalValue<SocialConnection[]>(storageKeys.socialConnections, []));
-      setSelectedLibrarySourceIds(
-        savedLibrarySources[0] ? [savedLibrarySources[0].id] : []
-      );
-      setApprovedPosts(readLocalValue(storageKeys.approvedPosts, []));
-      setRejectedPosts(readLocalValue(storageKeys.rejectedPosts, []));
-      const localQueue = readLocalValue<PostQueueItem[]>(storageKeys.postQueue, []);
-      setPostQueue(localQueue);
-      setQueueDebugMessage(`Local fallback loaded ${localQueue.length} queue item(s).`);
-      console.info("[SCC] Ready to Post load", {
-        storageMode: "local",
-        localCount: localQueue.length
-      });
-      setUseApprovedPosts(readLocalValue(storageKeys.useApprovedPosts, true));
-      setStorageMode("local");
-      setHasLoadedLocalData(true);
-      setAuthLoading(false);
+    setCampaigns(savedCampaigns);
+    setActiveCampaignId(
+      savedCampaigns.some((campaign) => campaign.id === savedActiveId)
+        ? savedActiveId
+        : savedCampaigns[0]?.id ?? initialCampaigns[0]?.id ?? ""
+    );
+    setUploadText(readLocalValue(storageKeys.pastPosts, defaultPastPosts));
+    setBrandVoice(readLocalValue(storageKeys.brandVoice, defaultBrandVoice));
+    const savedProfiles = readLocalValue<Profile[]>(
+      storageKeys.profiles,
+      initialProfiles
+    );
+    setProfiles(savedProfiles);
+    setSelectedProfileId(findDefaultPostingAccount(savedProfiles)?.id ?? savedProfiles[0]?.id ?? "");
+    const savedLibrarySources = readLocalValue<LibrarySource[]>(
+      storageKeys.librarySources,
+      initialLibrarySources
+    );
+    setLibrarySources(savedLibrarySources);
+    setMediaAssets(readLocalValue<MediaAsset[]>(storageKeys.mediaAssets, []));
+    setSocialConnections(readLocalValue<SocialConnection[]>(storageKeys.socialConnections, []));
+    setInspirationPatterns(readLocalValue<InspirationPattern[]>(storageKeys.inspirationPatterns, []));
+    setSourceInboxHistory(readLocalValue<SourceInboxHistoryItem[]>(storageKeys.sourceInboxHistory, []));
+    setSourceCaptures(readLocalValue<SourceCapture[]>(storageKeys.sourceCaptures, []));
+    setOpportunities(readLocalValue<Opportunity[]>(storageKeys.opportunities, []));
+    setFeedbackMemory(readLocalValue<FeedbackMemoryItem[]>(storageKeys.feedbackMemory, []));
+    setActivityLog(readLocalValue<ActivityLogItem[]>(storageKeys.activityLog, []));
+    setClaimLibrary(readLocalValue<ClaimLibraryItem[]>(storageKeys.claimLibrary, []));
+    setReviewLinks(readLocalValue<ReviewLink[]>(storageKeys.reviewLinks, []));
+    setReviewFeedback(readLocalValue<ReviewFeedback[]>(storageKeys.reviewFeedback, []));
+    setUseFeedbackMemory(readLocalValue(storageKeys.useFeedbackMemory, true));
+    setShowDemoData(readLocalValue(storageKeys.showDemoData, true));
+    setSelectedLibrarySourceIds(
+      savedLibrarySources[0] ? [savedLibrarySources[0].id] : []
+    );
+    setApprovedPosts(readLocalValue(storageKeys.approvedPosts, []));
+    setRejectedPosts(readLocalValue(storageKeys.rejectedPosts, []));
+    const localQueue = readLocalValue<PostQueueItem[]>(storageKeys.postQueue, []);
+    setPostQueue(localQueue);
+    setQueueDebugMessage(`Local fallback loaded ${localQueue.length} queue item(s).`);
+    console.info("[SCC] Ready to Post load", {
+      storageMode: "local",
+      localCount: localQueue.length
+    });
+    setUseApprovedPosts(readLocalValue(storageKeys.useApprovedPosts, true));
+    setStorageMode("local");
+    setWorkspace(null);
+    setWorkspaceConnectionError("");
+    setWorkspaceConnectionAttempt(0);
+    setHasLoadedLocalData(true);
+    setAuthLoading(false);
+    setGenerationNotice(reason);
+  }
+
+  function applySupabaseData(userEmail: string, workspaceContext: WorkspaceContext, data: PersistedAppData) {
+    setAuthUserEmail(userEmail);
+    setWorkspace(workspaceContext);
+    setCampaigns(data.campaigns);
+    setActiveCampaignId(data.campaigns[0]?.id ?? "");
+    setProfiles(data.profiles);
+    setSelectedProfileId(findDefaultPostingAccount(data.profiles)?.id ?? data.profiles[0]?.id ?? "");
+    setLibrarySources(data.librarySources);
+    setMediaAssets(data.mediaAssets);
+    setSocialConnections(data.socialConnections);
+    setInspirationPatterns(data.inspirationPatterns);
+    setSourceInboxHistory(readLocalValue<SourceInboxHistoryItem[]>(storageKeys.sourceInboxHistory, []));
+    setSourceCaptures(mergeById(data.sourceCaptures, readLocalValue<SourceCapture[]>(storageKeys.sourceCaptures, [])));
+    setOpportunities(data.opportunities);
+    setFeedbackMemory(data.feedbackMemory);
+    setActivityLog(mergeById(data.activityLog, readLocalValue<ActivityLogItem[]>(storageKeys.activityLog, [])));
+    setClaimLibrary(mergeById(data.claimLibrary, readLocalValue<ClaimLibraryItem[]>(storageKeys.claimLibrary, [])));
+    setReviewLinks(mergeById(data.reviewLinks, readLocalValue<ReviewLink[]>(storageKeys.reviewLinks, [])));
+    setReviewFeedback(mergeById(data.reviewFeedback, readLocalValue<ReviewFeedback[]>(storageKeys.reviewFeedback, [])));
+    setUseFeedbackMemory(readLocalValue(storageKeys.useFeedbackMemory, true));
+    setShowDemoData(readLocalValue(storageKeys.showDemoData, true));
+    setSelectedLibrarySourceIds(
+      data.librarySources[0] ? [data.librarySources[0].id] : []
+    );
+    setBrandVoice(data.brandVoice ?? defaultBrandVoice);
+    setApprovedPosts(data.approvedPosts);
+    setRejectedPosts(data.rejectedPosts);
+    const localQueueFallback = readLocalValue<PostQueueItem[]>(storageKeys.postQueue, []);
+    const mergedQueue = mergeById(data.postQueue, localQueueFallback);
+    setPostQueue(mergedQueue);
+    setQueueDebugMessage(
+      data.postQueueLoadError
+        ? `Supabase queue fetch failed: ${data.postQueueLoadError}. Showing ${localQueueFallback.length} local fallback item(s).`
+        : localQueueFallback.length > 0 && mergedQueue.length > data.postQueue.length
+        ? `Supabase loaded ${data.postQueue.length} queue items. Added ${mergedQueue.length - data.postQueue.length} local fallback item(s).`
+        : `Supabase loaded ${data.postQueue.length} queue item(s).`
+    );
+    console.info("[SCC] Ready to Post load", {
+      storageMode: "supabase",
+      supabaseCount: data.postQueue.length,
+      localFallbackCount: localQueueFallback.length,
+      mergedCount: mergedQueue.length
+    });
+    setUseApprovedPosts(readLocalValue(storageKeys.useApprovedPosts, true));
+    setStorageMode("supabase");
+    setWorkspaceConnectionError("");
+    setWorkspaceConnectionAttempt(0);
+    setHasLoadedLocalData(true);
+    setAuthLoading(false);
+  }
+
+  async function loadSupabaseWorkspaceWithRetry() {
+    setAuthLoading(true);
+    setWorkspaceConnectionError("");
+    setGenerationNotice("");
+    setWorkspaceConnectionAttempt(0);
+
+    if (!appUsesSupabase()) {
+      loadLocalData("Local mode is active because Supabase env vars are missing.");
+      return;
     }
 
-    async function loadData() {
-      if (!appUsesSupabase()) {
-        loadLocalData();
+    try {
+      const user = await withTimeout(
+        getCurrentSupabaseUser(),
+        workspaceStartupTimeouts.authCheckMs,
+        "Supabase auth check took longer than expected. Retry the workspace connection or restart npm run dev if this keeps happening."
+      );
+      if (!user) {
+        setAuthUserEmail("");
+        setWorkspace(null);
+        setStorageMode("supabase");
+        setHasLoadedLocalData(false);
+        setAuthLoading(false);
         return;
       }
 
-      try {
-        const user = await withTimeout(
-          getCurrentSupabaseUser(),
-          8000,
-          "Supabase auth check timed out. Restart npm run dev or check Supabase env vars."
-        );
-        if (!user) {
-          if (cancelled) return;
-          setAuthUserEmail("");
-          setWorkspace(null);
-          setStorageMode("supabase");
-          setHasLoadedLocalData(false);
-          setAuthLoading(false);
+      setAuthUserEmail(user.email ?? "");
+
+      let lastError: unknown;
+      for (let attempt = 1; attempt <= 2; attempt += 1) {
+        setWorkspaceConnectionAttempt(attempt);
+        try {
+          const workspaceContext = await withTimeout(
+            getOrCreateDefaultWorkspace(),
+            workspaceStartupTimeouts.workspaceSetupMs,
+            "Workspace setup took longer than expected. Retry the workspace connection or check Supabase schema and policies."
+          );
+          const data = await withTimeout(
+            loadSupabaseData(workspaceContext.id),
+            workspaceStartupTimeouts.dataLoadMs,
+            "Loading workspace data took longer than expected. Retry the workspace connection."
+          );
+          applySupabaseData(user.email ?? "", workspaceContext, data);
           return;
+        } catch (attemptError) {
+          lastError = attemptError;
+          if (attempt < 2) {
+            await new Promise((resolve) => window.setTimeout(resolve, workspaceStartupTimeouts.retryDelayMs));
+          }
         }
-
-        const workspaceContext = await withTimeout(
-          getOrCreateDefaultWorkspace(),
-          8000,
-          "Workspace setup timed out. Check Supabase schema and policies."
-        );
-        const data = await withTimeout(
-          loadSupabaseData(workspaceContext.id),
-          10000,
-          "Loading workspace data timed out. Check Supabase connection."
-        );
-        if (cancelled) return;
-
-        setAuthUserEmail(user.email ?? "");
-        setWorkspace(workspaceContext);
-        setCampaigns(data.campaigns);
-        setActiveCampaignId(data.campaigns[0]?.id ?? "");
-        setProfiles(data.profiles);
-        setSelectedProfileId(findDefaultPostingAccount(data.profiles)?.id ?? data.profiles[0]?.id ?? "");
-        setLibrarySources(data.librarySources);
-        setMediaAssets(data.mediaAssets);
-        setSocialConnections(data.socialConnections);
-        setSelectedLibrarySourceIds(
-          data.librarySources[0] ? [data.librarySources[0].id] : []
-        );
-        setBrandVoice(data.brandVoice ?? defaultBrandVoice);
-        setApprovedPosts(data.approvedPosts);
-        setRejectedPosts(data.rejectedPosts);
-        const localQueueFallback = readLocalValue<PostQueueItem[]>(storageKeys.postQueue, []);
-        const mergedQueue = mergeById(data.postQueue, localQueueFallback);
-        setPostQueue(mergedQueue);
-        setQueueDebugMessage(
-          data.postQueueLoadError
-            ? `Supabase queue fetch failed: ${data.postQueueLoadError}. Showing ${localQueueFallback.length} local fallback item(s).`
-            : localQueueFallback.length > 0 && mergedQueue.length > data.postQueue.length
-            ? `Supabase loaded ${data.postQueue.length} queue items. Added ${mergedQueue.length - data.postQueue.length} local fallback item(s).`
-            : `Supabase loaded ${data.postQueue.length} queue item(s).`
-        );
-        console.info("[SCC] Ready to Post load", {
-          storageMode: "supabase",
-          supabaseCount: data.postQueue.length,
-          localFallbackCount: localQueueFallback.length,
-          mergedCount: mergedQueue.length
-        });
-        setUseApprovedPosts(readLocalValue(storageKeys.useApprovedPosts, true));
-        setVoiceSources(readLocalValue(storageKeys.voiceSources, []));
-        setStorageMode("supabase");
-        setHasLoadedLocalData(true);
-        setAuthLoading(false);
-      } catch (error) {
-        if (cancelled) return;
-        loadLocalData();
-        setGenerationNotice(
-          error instanceof Error
-            ? `Supabase load failed, so local fallback is active: ${error.message}`
-            : "Supabase load failed, so local fallback is active."
-        );
       }
-    }
 
-    if (appUsesSupabase()) {
-      authFallbackTimer = window.setTimeout(() => {
-        if (cancelled) return;
-        console.warn("[SCC] Workspace check timed out. Loading local fallback.");
-        loadLocalData();
-        setGenerationNotice(
-          "Workspace check timed out, so local browser mode is active. Restart npm run dev or check Supabase settings when you want shared data."
-        );
-      }, 12000);
+      const message = lastError instanceof Error
+        ? lastError.message
+        : "Could not connect to your workspace.";
+      setStorageMode("supabase");
+      setHasLoadedLocalData(false);
+      setWorkspace(null);
+      setWorkspaceConnectionError(message);
+      setAuthLoading(false);
+    } catch (error) {
+      setStorageMode("supabase");
+      setHasLoadedLocalData(false);
+      setWorkspace(null);
+      setWorkspaceConnectionError(
+        error instanceof Error
+          ? error.message
+          : "Could not connect to your workspace."
+      );
+      setAuthLoading(false);
+    }
+  }
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadData() {
+      if (cancelled) return;
+      await loadSupabaseWorkspaceWithRetry();
     }
 
     loadData();
 
     return () => {
       cancelled = true;
-      if (authFallbackTimer) {
-        window.clearTimeout(authFallbackTimer);
-      }
     };
+    // Startup intentionally runs once; retry/local mode are driven by explicit buttons after this.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  useEffect(() => {
+    if (!authLoading || !appUsesSupabase()) return undefined;
+
+    const timeoutId = window.setTimeout(() => {
+      setStorageMode("supabase");
+      setHasLoadedLocalData(false);
+      setWorkspace(null);
+      setWorkspaceConnectionError(
+        "Workspace check is taking longer than expected. The shared workspace may still be warming up locally. Retry the workspace connection or continue in local browser mode for development."
+      );
+      setAuthLoading(false);
+    }, workspaceStartupTimeouts.uiWatchdogMs);
+
+    return () => window.clearTimeout(timeoutId);
+  }, [authLoading]);
 
   useEffect(() => {
     fetch("/api/status")
@@ -2002,6 +2034,90 @@ export function SocialCommandCenter() {
       })
       .catch(() => undefined);
   }, []);
+
+  useEffect(() => {
+    function handleCommandShortcut(event: KeyboardEvent) {
+      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") {
+        event.preventDefault();
+        setCommandBarOpen(true);
+      }
+    }
+
+    window.addEventListener("keydown", handleCommandShortcut);
+    return () => window.removeEventListener("keydown", handleCommandShortcut);
+  }, []);
+
+  async function refreshManagerFeedback() {
+    if (storageMode !== "supabase" || !workspace?.id) {
+      return;
+    }
+    try {
+      const nextFeedback = await loadReviewFeedbackFromSupabase(workspace.id);
+      setReviewFeedback((current) => {
+        const incomingIds = new Set(nextFeedback.map((item) => item.id));
+        const newItems = nextFeedback.filter((item) => !current.some((existing) => existing.id === item.id));
+        newItems.slice(0, 3).forEach((item) => {
+          recordActivity({
+            actionType:
+              item.status === "approved"
+                ? "Manager approved"
+                : item.status === "changes_requested"
+                  ? "Changes requested"
+                  : item.status === "ready_to_post"
+                    ? "Manager marked ready to post"
+                    : "Manager comment added",
+            objectType: item.contentType,
+            objectId: item.contentId,
+            title:
+              item.status === "approved"
+                ? "Manager approved item"
+                : item.status === "changes_requested"
+                  ? "Manager requested changes"
+                  : item.status === "ready_to_post"
+                    ? "Manager marked item ready to post"
+                    : "Manager comment added",
+            summary: item.comment || item.suggestedEdit || "Manager review feedback synced.",
+            destination: "Review Drafts",
+            status: "success"
+          });
+        });
+        return mergeById(
+          nextFeedback,
+          current.filter((item) => !incomingIds.has(item.id))
+        );
+      });
+    } catch (error) {
+      setQueueDebugMessage(
+        error instanceof Error
+          ? `Manager feedback refresh failed: ${error.message}`
+          : "Manager feedback refresh failed."
+      );
+    }
+  }
+
+  useEffect(() => {
+    if (storageMode !== "supabase" || !workspace?.id) return undefined;
+    const intervalId = window.setInterval(() => {
+      void refreshManagerFeedback();
+    }, 25000);
+    return () => window.clearInterval(intervalId);
+    // refreshManagerFeedback intentionally reads current state and records new feedback.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [storageMode, workspace?.id]);
+
+  useEffect(() => {
+    if (
+      screen === "Ready to Post" ||
+      screen === "Review Drafts" ||
+      screen === "Content Calendar" ||
+      screen === "Content Library" ||
+      screen === "Dashboard"
+    ) {
+      void refreshManagerFeedback();
+    }
+    // refresh on major manager-feedback surfaces only.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [screen, storageMode, workspace?.id]);
 
   useEffect(() => {
     if (!hasLoadedLocalData || storageMode !== "local") {
@@ -2027,13 +2143,6 @@ export function SocialCommandCenter() {
     writeLocalValue(storageKeys.profiles, profiles);
   }, [profiles, hasLoadedLocalData, storageMode]);
 
-  useEffect(() => {
-    if (!hasLoadedLocalData || storageMode !== "local") {
-      return;
-    }
-
-    writeLocalValue(storageKeys.voiceSources, voiceSources);
-  }, [voiceSources, hasLoadedLocalData, storageMode]);
 
   useEffect(() => {
     if (!hasLoadedLocalData || storageMode !== "local") {
@@ -2066,6 +2175,78 @@ export function SocialCommandCenter() {
 
     writeLocalValue(storageKeys.socialConnections, socialConnections);
   }, [socialConnections, hasLoadedLocalData, storageMode]);
+
+  useEffect(() => {
+    if (!hasLoadedLocalData || storageMode !== "local") {
+      return;
+    }
+
+    writeLocalValue(storageKeys.inspirationPatterns, inspirationPatterns);
+  }, [inspirationPatterns, hasLoadedLocalData, storageMode]);
+
+  useEffect(() => {
+    if (!hasLoadedLocalData) {
+      return;
+    }
+
+    writeLocalValue(storageKeys.sourceInboxHistory, sourceInboxHistory);
+  }, [sourceInboxHistory, hasLoadedLocalData]);
+
+  useEffect(() => {
+    if (!hasLoadedLocalData) {
+      return;
+    }
+
+    writeLocalValue(storageKeys.sourceCaptures, sourceCaptures);
+  }, [sourceCaptures, hasLoadedLocalData]);
+
+  useEffect(() => {
+    if (!hasLoadedLocalData || storageMode !== "local") {
+      return;
+    }
+
+    writeLocalValue(storageKeys.opportunities, opportunities);
+  }, [opportunities, hasLoadedLocalData, storageMode]);
+
+  useEffect(() => {
+    if (!hasLoadedLocalData) {
+      return;
+    }
+
+    writeLocalValue(storageKeys.activityLog, activityLog);
+  }, [activityLog, hasLoadedLocalData]);
+
+  useEffect(() => {
+    if (!hasLoadedLocalData) {
+      return;
+    }
+
+    writeLocalValue(storageKeys.reviewLinks, reviewLinks);
+  }, [reviewLinks, hasLoadedLocalData]);
+
+  useEffect(() => {
+    if (!hasLoadedLocalData) {
+      return;
+    }
+
+    writeLocalValue(storageKeys.reviewFeedback, reviewFeedback);
+  }, [reviewFeedback, hasLoadedLocalData]);
+
+  useEffect(() => {
+    if (!hasLoadedLocalData) {
+      return;
+    }
+
+    writeLocalValue(storageKeys.showDemoData, showDemoData);
+  }, [showDemoData, hasLoadedLocalData]);
+
+  useEffect(() => {
+    if (!hasLoadedLocalData || storageMode !== "local") {
+      return;
+    }
+
+    writeLocalValue(storageKeys.claimLibrary, claimLibrary);
+  }, [claimLibrary, hasLoadedLocalData, storageMode]);
 
   useEffect(() => {
     if (!hasLoadedLocalData || storageMode !== "local") {
@@ -2128,6 +2309,7 @@ export function SocialCommandCenter() {
     setSelectedPlatforms(["LinkedIn", "X", "Instagram"]);
     setSelectedVoiceInfluenceIds([]);
     setSelectedInspirationProfileIds([]);
+    setActiveOpportunityContext(null);
     setSelectedLibrarySourceIds([]);
     setUseApprovedPosts(true);
     setActiveCampaignId("");
@@ -2135,6 +2317,100 @@ export function SocialCommandCenter() {
     setGenerationError("");
     setGenerationNotice("Ready for a new post.");
     setScreen("New Campaign");
+  }
+
+  function runQuickAction(actionId: string) {
+    setCommandBarOpen(false);
+    if (actionId === "view-activity") {
+      setScreen("Dashboard");
+      return;
+    }
+
+    if (actionId === "undo-last-action") {
+      undoLastActivity();
+      return;
+    }
+
+    if (actionId === "create-post") {
+      startNewPost();
+      return;
+    }
+
+    if (actionId === "import-past-content") {
+      setSourceInboxInitialView("Import Past Content");
+      setScreen("Source Inbox");
+      return;
+    }
+
+    if (
+      actionId === "install-browser-capture" ||
+      actionId === "open-capture-queue" ||
+      actionId === "triage-new-captures"
+    ) {
+      setSourceInboxInitialView("Browser Captures");
+      setScreen("Source Inbox");
+      return;
+    }
+
+    if (actionId === "add-brain-source" || actionId === "source-inbox") {
+      setSourceInboxInitialView("Classify Source");
+      setScreen("Source Inbox");
+      return;
+    }
+
+    if (actionId === "opportunity-inbox") {
+      setScreen("Opportunity Inbox");
+      return;
+    }
+
+    if (actionId === "review-drafts") {
+      setScreen("Review Drafts");
+      return;
+    }
+
+    if (actionId === "upload-media") {
+      setScreen("Media Library");
+      return;
+    }
+
+    if (
+      actionId === "add-profile" ||
+      actionId === "add-inspiration-profile" ||
+      actionId === "add-competitor-profile" ||
+      actionId === "add-profile-source"
+    ) {
+      setScreen("Profiles");
+      return;
+    }
+
+    if (actionId === "repurpose-content") {
+      setScreen("Repurpose");
+      return;
+    }
+
+    if (actionId === "ready-to-post") {
+      setScreen("Ready to Post");
+      return;
+    }
+
+    if (actionId === "content-calendar") {
+      setScreen("Content Calendar");
+      return;
+    }
+
+    if (actionId === "analytics") {
+      setScreen("Analytics");
+      return;
+    }
+
+    if (actionId === "feedback-memory") {
+      setScreen("Brand Voice Rules");
+      return;
+    }
+
+    if (actionId === "setup-checklist") {
+      setScreen("Dashboard");
+    }
   }
 
   function togglePlatform(platform: Platform) {
@@ -2231,6 +2507,163 @@ export function SocialCommandCenter() {
         warnings: asset.sensitivityWarnings
       }
     }));
+    recordActivity({
+      actionType: "Media asset used in post",
+      objectType: "Media Asset",
+      objectId: asset.id,
+      title: "Media asset used",
+      summary: `${asset.filename} was attached to a post brief.`,
+      destination: "Create Post",
+      status: "success"
+    });
+  }
+
+  function mediaContextFromAsset(asset: MediaAsset, contextNotes?: string): CampaignMediaContext {
+    return {
+      type: asset.mediaType,
+      filename: asset.filename,
+      notes: [asset.notes, contextNotes].filter(Boolean).join("\n\n"),
+      assetId: asset.id,
+      assetName: asset.filename,
+      publicUrl: asset.publicUrl,
+      storagePath: asset.storagePath,
+      analysis: {
+        description:
+          asset.description ||
+          (asset.mediaType === "image"
+            ? "Image saved without AI visual analysis."
+            : "Video/audio transcription and frame analysis can be added later."),
+        angles: asset.suggestedAngles ?? [],
+        captionIdeas: asset.overlayText ? [asset.overlayText] : [],
+        warnings: asset.sensitivityWarnings ?? []
+      }
+    };
+  }
+
+  async function generateMediaContentPack(asset: MediaAsset, config: MediaContentPackConfig) {
+    setGenerationError("");
+    setGenerationNotice("");
+    if (config.platforms.length === 0) {
+      setGenerationError("Select at least one platform for the content pack.");
+      return;
+    }
+    if (looksLikeGenericIntent(config.intent)) {
+      setGenerationError("Add a main message so the media pack knows what to say.");
+      return;
+    }
+
+    const selectedProfile =
+      profiles.find((profile) => profile.id === config.postingAccountId) ||
+      profiles.find((profile) => profile.type === "Company Account") ||
+      profiles[0];
+    const selectedLibrarySources = librarySources.filter((source) => source.reviewStatus !== "Save only");
+    const packMediaContext = mediaContextFromAsset(asset, config.contextNotes);
+
+    setIsGenerating(true);
+    try {
+      const response = await withTimeout(
+        fetch("/api/media/generate-content-pack", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            mediaAsset: asset,
+            postingAccount: selectedProfile,
+            styleChip: config.styleChip,
+            intent: config.intent.trim(),
+            contextNotes: config.contextNotes.trim(),
+            platforms: config.platforms,
+            companyKnowledge: selectedLibrarySources,
+            brandVoice,
+            feedbackMemory: feedbackMemorySummary(feedbackMemory, useFeedbackMemory),
+            claimLibrary: claimContextForGeneration(claimLibrary)
+          })
+        }),
+        30000,
+        "Media content pack generation took too long. Try again or add more context."
+      );
+      const payload = await readJsonResponse(response, "Media content pack generation failed");
+      if (!response.ok || !payload?.ok) {
+        throw new Error(payload?.error ?? "Media content pack generation failed.");
+      }
+
+      const generatedBy = payload.generatedBy === "AI" ? "AI" : "Mock";
+      const claimContext = claimContextForGeneration(claimLibrary);
+      const aiPosts = postsFromAiResponse(
+        payload.data,
+        config.platforms,
+        selectedProfile,
+        selectedLibrarySources,
+        packMediaContext
+      );
+      if (aiPosts.length === 0) {
+        throw new Error("No usable posts were returned for that media pack.");
+      }
+
+      const nowLabel = new Intl.DateTimeFormat("en", {
+        month: "short",
+        day: "numeric"
+      }).format(new Date());
+      saveCampaign({
+        id: `camp-media-${Date.now()}`,
+        name: `Media pack: ${asset.filename}`,
+        idea: [config.intent.trim(), config.contextNotes.trim()].filter(Boolean).join("\n\n"),
+        intent: config.intent.trim(),
+        contentAngle: "Behind the scenes",
+        campaignType: "Original",
+        platforms: config.platforms,
+        posts: aiPosts,
+        createdAt: nowLabel,
+        generatedBy,
+        mediaContext: {
+          ...packMediaContext,
+          analysis:
+            payload.data?.mediaAnalysis ??
+            packMediaContext.analysis ??
+            createMockMediaAnalysis(packMediaContext)
+        },
+        profileId: selectedProfile?.id,
+        profileName: selectedProfile?.name,
+        profileType: selectedProfile?.type,
+        profileRole: selectedProfile?.role,
+        simpleStyleChips: [config.styleChip],
+        simpleStyleInstructions: simpleStyleOptions
+          .filter((style) => style.label === config.styleChip)
+          .map((style) => style.instruction),
+        sourceLibraryIds: selectedLibrarySources.map((source) => source.id),
+        sourceLibraryNames: selectedLibrarySources.map(getLibrarySourceDisplayName),
+        claimLibraryIds: claimContext.claimIds,
+        claimLibraryApprovedClaims: claimContext.approvedClaims,
+        claimLibraryNeedsReviewClaims: claimContext.needsReviewClaims,
+        claimLibraryDoNotSayClaims: claimContext.doNotSayClaims
+      });
+      recordActivity({
+        actionType: "Media content pack generated",
+        objectType: "Media Content Pack",
+        objectId: asset.id,
+        title: "Media content pack generated",
+        summary: `${asset.filename} generated ${config.platforms.length} platform draft${config.platforms.length === 1 ? "" : "s"}.`,
+        destination: "Review Drafts",
+        status: "success"
+      });
+      recordActivity({
+        actionType: "Media asset used in post",
+        objectType: "Media Asset",
+        objectId: asset.id,
+        title: "Media asset used in generated posts",
+        summary: `${asset.filename} was linked to a generated content pack.`,
+        destination: "Review Drafts",
+        status: "success"
+      });
+      setGenerationNotice(
+        generatedBy === "AI"
+          ? "Generated media content pack with AI."
+          : "Generated media content pack with mock fallback."
+      );
+    } catch (error) {
+      setGenerationError(error instanceof Error ? error.message : "Media content pack generation failed.");
+    } finally {
+      setIsGenerating(false);
+    }
   }
 
   function buildCampaign(
@@ -2261,6 +2694,19 @@ export function SocialCommandCenter() {
     const selectedInspirationProfiles = profiles.filter((profile) =>
       selectedInspirationProfileIds.includes(profile.id)
     );
+    const claimContext = claimContextForGeneration(claimLibrary);
+    const voiceExampleTitles = [
+      ...profileVoiceExampleTitles(selectedProfile),
+      ...profileVoiceSourceTitles(selectedProfile),
+      ...selectedVoiceInfluences.flatMap(profileVoiceExampleTitles),
+      ...selectedVoiceInfluences.flatMap(profileVoiceSourceTitles),
+      ...selectedInspirationProfiles.flatMap((profile) =>
+        profileVoiceExampleTitles(profile).map((title) => `${title} (pattern only)`)
+      ),
+      ...selectedInspirationProfiles.flatMap((profile) =>
+        profileVoiceSourceTitles(profile).map((title) => `${title} (pattern only)`)
+      )
+    ];
     return {
       id: `camp-${Date.now()}`,
       name: effectiveCampaignName,
@@ -2272,6 +2718,10 @@ export function SocialCommandCenter() {
       campaignType: "Original",
       platforms: safePlatforms,
       posts,
+      contentOrigin:
+        posts.find((post) => post.contentOrigin)?.contentOrigin ??
+        (generatedBy === "AI" ? "AI-generated" : undefined),
+      manualSourceContent: posts.find((post) => post.manualSourceContent)?.manualSourceContent,
       createdAt: new Intl.DateTimeFormat("en", {
         month: "short",
         day: "numeric"
@@ -2294,10 +2744,17 @@ export function SocialCommandCenter() {
       voiceInfluenceNames: selectedVoiceInfluences.map((profile) => profile.name),
       inspirationProfileIds: selectedInspirationProfiles.map((profile) => profile.id),
       inspirationProfileNames: selectedInspirationProfiles.map((profile) => profile.name),
+      opportunityId: activeOpportunityContext?.id,
+      opportunityTitle: activeOpportunityContext?.title,
+      voiceExampleTitles: Array.from(new Set(voiceExampleTitles)).slice(0, 8),
       simpleStyleChips,
       simpleStyleInstructions: effectiveStyleInstructions,
       sourceLibraryIds: selectedLibrarySources.map((source) => source.id),
-      sourceLibraryNames: selectedLibrarySources.map(getLibrarySourceDisplayName)
+      sourceLibraryNames: selectedLibrarySources.map(getLibrarySourceDisplayName),
+      claimLibraryIds: claimContext.claimIds,
+      claimLibraryApprovedClaims: claimContext.approvedClaims,
+      claimLibraryNeedsReviewClaims: claimContext.needsReviewClaims,
+      claimLibraryDoNotSayClaims: claimContext.doNotSayClaims
     };
   }
 
@@ -2322,6 +2779,7 @@ export function SocialCommandCenter() {
             .filter((post) => post.profileId === selectedProfile.id)
             .slice(0, 5)
         : [];
+    const currentFeedbackSummary = feedbackMemorySummary(feedbackMemory, useFeedbackMemory);
 
     return buildCampaign(
       "Mock",
@@ -2340,7 +2798,8 @@ export function SocialCommandCenter() {
         simpleStyleChips,
         simpleStyleOptions
           .filter((style) => simpleStyleChips.includes(style.label))
-          .map((style) => style.instruction)
+          .map((style) => style.instruction),
+        currentFeedbackSummary
       )
     );
   }
@@ -2355,6 +2814,23 @@ export function SocialCommandCenter() {
     };
     setCampaigns((current) => [campaignWithSafety, ...current]);
     setActiveCampaignId(campaignWithSafety.id);
+    if (campaignWithSafety.opportunityId) {
+      setOpportunities((current) => {
+        const updated = current.map((opportunity) =>
+          opportunity.id === campaignWithSafety.opportunityId
+            ? {
+                ...opportunity,
+                status: "Drafted" as const,
+                relatedCampaignId: campaignWithSafety.id,
+                updatedAt: new Date().toISOString()
+              }
+            : opportunity
+        );
+        const changedOpportunity = updated.find((opportunity) => opportunity.id === campaignWithSafety.opportunityId);
+        if (changedOpportunity) persistOpportunity(changedOpportunity);
+        return updated;
+      });
+    }
     setScreen("Review Drafts");
     if (storageMode === "supabase") {
       saveCampaignToSupabase(campaignWithSafety, mediaFile).catch((error) => {
@@ -2511,31 +2987,37 @@ export function SocialCommandCenter() {
 
     setIsGenerating(true);
     try {
-      const response = await fetch("/api/generate", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          mode: "repurpose",
-          campaignTitle: `Repurposed: ${source?.label}`,
-          intent: repurposeIntent.trim(),
-          contentAngle: repurposeContentAngle,
-          rawIdea: `Repurpose source:\n${source?.content ?? ""}`,
-          selectedPlatforms: repurposePlatforms,
-          profile: selectedProfile,
-          approvedExamples: selectedApprovedExamples,
-          brandVoice,
-          sourceLibraryItems: selectedLibrarySources,
-          mediaContext: repurposeMediaContext.filename || repurposeMediaContext.notes
-            ? repurposeMediaContext
-            : undefined,
-          repurpose: {
-            sourceType: source!.type,
-            sourceLabel: source!.label,
-            sourceContent: source!.content,
-            reuseOriginalMedia: repurposeReuseMedia
-          }
-        })
-      });
+      const response = await withTimeout(
+        fetch("/api/generate", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            mode: "repurpose",
+            campaignTitle: `Repurposed: ${source?.label}`,
+            intent: repurposeIntent.trim(),
+            contentAngle: repurposeContentAngle,
+            rawIdea: `Repurpose source:\n${source?.content ?? ""}`,
+            selectedPlatforms: repurposePlatforms,
+            profile: selectedProfile,
+            approvedExamples: selectedApprovedExamples,
+            feedbackMemory: feedbackMemorySummary(feedbackMemory, useFeedbackMemory),
+            claimLibrary: claimContextForGeneration(claimLibrary),
+            brandVoice,
+            sourceLibraryItems: selectedLibrarySources,
+            mediaContext: repurposeMediaContext.filename || repurposeMediaContext.notes
+              ? repurposeMediaContext
+              : undefined,
+            repurpose: {
+              sourceType: source!.type,
+              sourceLabel: source!.label,
+              sourceContent: source!.content,
+              reuseOriginalMedia: repurposeReuseMedia
+            }
+          })
+        }),
+        30000,
+        "AI repurpose generation took too long. Use mock fallback or try again."
+      );
       const payload = await readJsonResponse(response, "OpenAI repurpose generation failed");
       if (payload?.fallbackReason === "missing_api_key") {
         saveCampaign(createMockRepurposeCampaign());
@@ -2583,6 +3065,9 @@ export function SocialCommandCenter() {
   }
 
   function campaignBriefIssue() {
+    if (!selectedProfileId) {
+      return "Select or create a posting account before generating.";
+    }
     if (selectedPlatforms.length === 0) {
       return "Select at least one platform before generating.";
     }
@@ -2590,6 +3075,76 @@ export function SocialCommandCenter() {
       return "Add a main point so the AI knows what this post should say.";
     }
     return "";
+  }
+
+  function handleCreateManualDraft(input: {
+    sharedContent: string;
+    platformContent: Partial<Record<Platform, string>>;
+    platformSpecific: boolean;
+  }) {
+    setGenerationError("");
+    setGenerationNotice("");
+
+    if (!selectedProfileId) {
+      setGenerationError("Select or create a posting account before creating a manual draft.");
+      return;
+    }
+    if (selectedPlatforms.length === 0) {
+      setGenerationError("Select at least one platform before creating a manual draft.");
+      return;
+    }
+
+    const safePlatforms: Platform[] = selectedPlatforms.length > 0 ? selectedPlatforms : ["LinkedIn"];
+    const selectedProfile = profiles.find((profile) => profile.id === selectedProfileId);
+    const selectedLibrarySources = selectedLibrarySourceIds.length > 0
+      ? librarySources.filter((source) => selectedLibrarySourceIds.includes(source.id))
+      : librarySources;
+    const now = Date.now();
+    const posts = safePlatforms
+      .map((platform) => {
+        const copy = (input.platformSpecific ? input.platformContent[platform] : input.sharedContent)?.trim();
+        if (!copy) return null;
+        const basePost: GeneratedPost = {
+          id: `manual-${now}-${platform.toLowerCase()}`,
+          platform,
+          postCopy: copy,
+          content: copy,
+          status: "draft",
+          score: 86,
+          generatedBy: "Mock",
+          contentOrigin: "Manually written",
+          manualSourceContent: copy,
+          mediaUsed: Boolean(mediaContext.filename || mediaContext.assetId || mediaContext.publicUrl),
+          rationale: "Manually written draft. Review, edit, improve with AI, or approve it like any generated draft.",
+          profileId: selectedProfile?.id,
+          profileName: selectedProfile?.name,
+          profileType: selectedProfile?.type,
+          profileRole: selectedProfile?.role,
+          sourceLibraryIds: selectedLibrarySources.map((source) => source.id),
+          sourceLibraryNames: selectedLibrarySources.map(getLibrarySourceDisplayName),
+          review: {
+            status: "Draft"
+          }
+        };
+        return {
+          ...basePost,
+          safetyCheck: runFallbackBrandSafetyCheck(copy, undefined, basePost)
+        };
+      })
+      .filter(Boolean) as GeneratedPost[];
+
+    if (posts.length === 0) {
+      setGenerationError("Write or paste a manual draft before continuing.");
+      return;
+    }
+
+    saveCampaign({
+      ...buildCampaign("Mock", posts, mediaContext.analysis),
+      generatedBy: "Mock",
+      contentOrigin: "Manually written",
+      manualSourceContent: posts.map((post) => `${post.platform}: ${post.postCopy ?? post.content}`).join("\n\n")
+    });
+    setGenerationNotice("Manual draft saved to Review Drafts.");
   }
 
   async function handleGenerate() {
@@ -2635,38 +3190,44 @@ export function SocialCommandCenter() {
       if (mediaContext.type === "image" && mediaImageDataUrl && !generationImageDataUrl) {
         setGenerationNotice("Using your media notes and saved image analysis for generation.");
       }
-      const response = await fetch("/api/generate", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json"
-        },
-        body: JSON.stringify({
-          campaignTitle: effectiveCampaignTitle,
-          intent: intent.trim(),
-          campaignTemplate:
-            campaignTemplate === "Other / blank" ? undefined : campaignTemplate,
-          contentAngle: effectiveContentAngle,
-          simpleStyleChips,
-          simpleStyleInstructions: simpleStyleOptions
-            .filter((style) => simpleStyleChips.includes(style.label))
-            .map((style) => style.instruction),
-          rawIdea: effectiveRawIdea,
-          selectedPlatforms: safePlatforms,
-          profile: selectedProfile,
-          voiceInfluences: selectedVoiceInfluences,
-          inspirationProfiles: selectedInspirationProfiles,
-          approvedExamples: selectedApprovedExamples,
-          brandVoice,
-          sourceLibraryItems: selectedLibrarySources,
-          mediaContext:
-            mediaContext.filename || mediaContext.notes
-              ? {
-                  ...mediaContext,
-                  imageDataUrl: generationImageDataUrl
-                }
-              : undefined
-        })
-      });
+      const response = await withTimeout(
+        fetch("/api/generate", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json"
+          },
+          body: JSON.stringify({
+            campaignTitle: effectiveCampaignTitle,
+            intent: intent.trim(),
+            campaignTemplate:
+              campaignTemplate === "Other / blank" ? undefined : campaignTemplate,
+            contentAngle: effectiveContentAngle,
+            simpleStyleChips,
+            simpleStyleInstructions: simpleStyleOptions
+              .filter((style) => simpleStyleChips.includes(style.label))
+              .map((style) => style.instruction),
+            rawIdea: effectiveRawIdea,
+            selectedPlatforms: safePlatforms,
+            profile: selectedProfile,
+            voiceInfluences: selectedVoiceInfluences,
+            inspirationProfiles: selectedInspirationProfiles,
+            approvedExamples: selectedApprovedExamples,
+            feedbackMemory: feedbackMemorySummary(feedbackMemory, useFeedbackMemory),
+            claimLibrary: claimContextForGeneration(claimLibrary),
+            brandVoice,
+            sourceLibraryItems: selectedLibrarySources,
+            mediaContext:
+              mediaContext.filename || mediaContext.notes
+                ? {
+                    ...mediaContext,
+                    imageDataUrl: generationImageDataUrl
+                  }
+                : undefined
+          })
+        }),
+        30000,
+        "AI generation took too long. Use mock fallback or try again."
+      );
       const payload = await readJsonResponse(response, "OpenAI generation failed");
 
       if (payload?.fallbackReason === "missing_api_key") {
@@ -2742,9 +3303,9 @@ export function SocialCommandCenter() {
     setApprovedPosts([]);
     setRejectedPosts([]);
     setPostQueue([]);
-    setVoiceSources([]);
     setLibrarySources([]);
     setMediaAssets([]);
+    setOpportunities([]);
     setSelectedLibrarySourceIds([]);
     setSelectedProfileId("");
     clearMedia();
@@ -2777,6 +3338,28 @@ export function SocialCommandCenter() {
     const sourcesDemo = demoKnowledgeBase();
     const campaignDemo = demoCampaign(profilesDemo, sourcesDemo);
     const approvedDemo = demoApprovedPosts();
+    const claimDemo = demoClaimLibrary(sourcesDemo);
+    const now = new Date();
+    const demoQueue = campaignDemo.posts
+      .filter((post) => post.status === "approved")
+      .map((post, index) => {
+        const item = createQueueItem(post, campaignDemo);
+        const postedAt = new Date(now);
+        postedAt.setDate(now.getDate() - index - 1);
+        return {
+          ...item,
+          id: `demo-queue-${post.id}`,
+          status: index < 2 ? "Posted" : "Ready",
+          postedAt: index < 2 ? postedAt.toISOString() : "",
+          livePostUrl: index < 2 ? `https://example.com/demo-post-${index + 1}` : "",
+          publishNotes: index < 2 ? "Demo metrics for founder presentation." : "",
+          metrics: index === 0
+            ? { impressions: 1840, likes: 72, comments: 9, shares: 12, saves: 6, clicks: 18 }
+            : index === 1
+              ? { impressions: 940, likes: 38, comments: 5, shares: 7, saves: 3, clicks: 11 }
+              : {}
+        } satisfies PostQueueItem;
+      });
 
     const mergeById = <T extends { id: string }>(current: T[], incoming: T[]) => [
       ...incoming,
@@ -2787,11 +3370,22 @@ export function SocialCommandCenter() {
     setLibrarySources((current) => mergeById(current, sourcesDemo));
     setCampaigns((current) => mergeById(current, [campaignDemo]));
     setApprovedPosts((current) => mergeById(current, approvedDemo));
+    setPostQueue((current) => mergeById(current, demoQueue));
+    setClaimLibrary((current) => mergeById(current, claimDemo));
     setBrandVoice(demoBrandRules);
+    setShowDemoData(true);
     setSelectedProfileId("demo-profile-conduit");
     setSelectedVoiceInfluenceIds(["demo-profile-danny"]);
     setActiveCampaignId("demo-campaign-office-workshop");
     setGenerationNotice("Demo data loaded.");
+    recordActivity({
+      actionType: "Demo data loaded",
+      objectType: "Workspace",
+      title: "Demo data loaded",
+      summary: "Sample profiles, knowledge, claims, briefs, approved examples, and queue items were added.",
+      destination: "Dashboard",
+      status: "success"
+    });
 
     if (storageMode === "supabase") {
       profilesDemo.forEach((profile) => persistProfile(profile));
@@ -2810,7 +3404,37 @@ export function SocialCommandCenter() {
       approvedDemo.forEach((memory) => {
         saveApprovedPostToSupabase(memory).catch(() => undefined);
       });
+      demoQueue.forEach((item) => {
+        savePostQueueItemToSupabase(item).catch(() => undefined);
+      });
+      claimDemo.forEach((claim) => persistClaimLibraryItem(claim));
     }
+  }
+
+  function hideDemoData() {
+    setShowDemoData(false);
+    setGenerationNotice("Demo data hidden from normal workspace views.");
+    recordActivity({
+      actionType: "Demo data hidden",
+      objectType: "Workspace",
+      title: "Demo data hidden",
+      summary: "Demo-labeled records remain saved but are hidden from normal workspace views.",
+      destination: "Dashboard",
+      status: "success"
+    });
+  }
+
+  function showDemoDataAgain() {
+    setShowDemoData(true);
+    setGenerationNotice("Demo data is visible again.");
+    recordActivity({
+      actionType: "Demo data shown",
+      objectType: "Workspace",
+      title: "Demo data shown",
+      summary: "Demo-labeled records are visible in workspace views again.",
+      destination: "Dashboard",
+      status: "success"
+    });
   }
 
   function clearDemoData() {
@@ -2827,6 +3451,7 @@ export function SocialCommandCenter() {
 
     setProfiles((current) => current.filter((profile) => !isDemo(profile)));
     setLibrarySources((current) => current.filter((source) => !isDemo(source)));
+    setClaimLibrary((current) => current.filter((claim) => !isDemo({ id: claim.id, name: claim.claimText })));
     setCampaigns((current) => current.filter((campaign) => !isDemo(campaign)));
     setApprovedPosts((current) =>
       current.filter(
@@ -2855,6 +3480,14 @@ export function SocialCommandCenter() {
         : current
     );
     setGenerationNotice("Demo data cleared.");
+    recordActivity({
+      actionType: "Demo data cleared",
+      objectType: "Workspace",
+      title: "Demo data cleared",
+      summary: "Only demo-labeled records were removed.",
+      destination: "Dashboard",
+      status: "success"
+    });
 
     if (storageMode === "supabase") {
       profiles.filter((profile) => isDemo(profile)).forEach((profile) => removeProfile(profile.id));
@@ -2893,13 +3526,15 @@ export function SocialCommandCenter() {
     }
   }
 
-  function updateQueueItem(id: string, updates: Partial<PostQueueItem>) {
+  function updateQueueItem(id: string, updates: Partial<PostQueueItem>, options?: { silentActivity?: boolean }) {
     let nextItem: PostQueueItem | undefined;
+    let previousItem: PostQueueItem | undefined;
     setPostQueue((current) =>
       current.map((item) => {
         if (item.id !== id) {
           return item;
         }
+        previousItem = item;
         nextItem = {
           ...item,
           ...updates,
@@ -2916,6 +3551,64 @@ export function SocialCommandCenter() {
         const detail = error instanceof Error ? error.message : "Unknown Supabase queue update failure.";
         setQueueDebugMessage(`Supabase queue update failed: ${detail}`);
         setGenerationNotice(friendlyApprovalMessage("local"));
+      });
+    }
+
+    if (!options?.silentActivity && nextItem && previousItem && ("status" in updates || "hiddenFromQueue" in updates || "plannedAt" in updates)) {
+      const isHidden = updates.hiddenFromQueue === true;
+      const nextStatus = updates.status ? normalizeQueueStatus(updates.status) : normalizeQueueStatus(nextItem.status);
+      const previousStatus = normalizeQueueStatus(previousItem.status);
+      const actionType = isHidden
+        ? "Item hidden from queue"
+        : nextStatus === "Archived" && previousStatus !== "Archived"
+          ? "Item archived"
+          : nextStatus === "Scheduled" && previousStatus !== "Scheduled"
+            ? "Item scheduled"
+            : nextStatus === "Posted" && previousStatus !== "Posted"
+              ? "Item marked posted"
+              : nextStatus === "Replied" && previousStatus !== "Replied"
+                ? "Item marked replied"
+                : "Queue item updated";
+      recordActivity({
+        actionType,
+        objectType: queueContentType(nextItem),
+        objectId: nextItem.id,
+        title: actionType,
+        summary: `${nextItem.campaignName} ${isHidden ? "was hidden from the queue." : `is now ${nextStatus}.`}`,
+        destination: "Ready to Post",
+        status: "success",
+        undo: isHidden || nextStatus === "Archived"
+          ? {
+              type: "queue-item-restore",
+              label: isHidden ? "Undo hide" : "Restore item",
+              payload: { item: previousItem }
+            }
+          : undefined
+      });
+    }
+  }
+
+  function deleteQueueItem(id: string) {
+    const deletedItem = postQueue.find((item) => item.id === id);
+    setPostQueue((current) => current.filter((item) => item.id !== id));
+    if (deletedItem) {
+      const deletedArchivedItem = normalizeQueueStatus(deletedItem.status) === "Archived";
+      const actionType = deletedArchivedItem ? "Archived item deleted" : "Test item deleted";
+      recordActivity({
+        actionType,
+        objectType: queueContentType(deletedItem),
+        objectId: deletedItem.id,
+        title: actionType,
+        summary: `${deletedItem.campaignName} was removed from the execution queue.`,
+        destination: "Ready to Post",
+        status: "warning"
+      });
+    }
+    if (storageMode === "supabase") {
+      deletePostQueueItemFromSupabase(id).catch((error) => {
+        console.error("[SCC] Ready to Post delete failed", error);
+        const detail = error instanceof Error ? error.message : "Unknown queue delete failure.";
+        setQueueDebugMessage(`Queue delete failed: ${detail}`);
       });
     }
   }
@@ -2966,14 +3659,99 @@ export function SocialCommandCenter() {
         ).catch(() => undefined);
       }
     }
+    if (
+      updatedPost &&
+      activeCampaign &&
+      !updates.status &&
+      (updates.content !== undefined || updates.postCopy !== undefined || updates.review !== undefined || updates.safetyCheck !== undefined)
+    ) {
+      const queuedReviewItem = postQueue.find((item) => item.generatedPostId === updatedPost?.id);
+      if (queuedReviewItem) {
+        updateQueueItem(
+          queuedReviewItem.id,
+          {
+            content: userFacingPostContent(updatedPost.content, activeCampaign, updatedPost),
+            postCopy: userFacingPostContent(updatedPost.content, activeCampaign, updatedPost),
+            safetyCheck: updatedPost.safetyCheck,
+            review: updatedPost.review ?? queuedReviewItem.review
+          },
+          { silentActivity: true }
+        );
+      }
+    }
     if (updatedPost && previousPost?.status !== updates.status) {
       if (updates.status === "approved") {
         rememberApprovedPost(updatedPost);
         addPostToQueue(updatedPost, variantNumber);
+        captureFeedbackMemory({
+          sourceType: "approval",
+          platform: updatedPost.platform,
+          postingAccountId: updatedPost.profileId,
+          postingAccountName: updatedPost.profileName,
+          revisedContent: userFacingPostContent(updatedPost.content, activeCampaign, updatedPost),
+          feedbackText: "User approved this draft."
+        });
       }
       if (updates.status === "rejected") {
         rememberRejectedPost(updatedPost);
+        captureFeedbackMemory({
+          sourceType: "rejection",
+          platform: updatedPost.platform,
+          postingAccountId: updatedPost.profileId,
+          postingAccountName: updatedPost.profileName,
+          originalContent: userFacingPostContent(updatedPost.content, activeCampaign, updatedPost),
+          feedbackText: "User rejected this draft."
+        });
       }
+    }
+    if (updatedPost && updates.review?.feedback) {
+      captureFeedbackMemory({
+        sourceType: "review feedback",
+        platform: updatedPost.platform,
+        postingAccountId: updatedPost.profileId,
+        postingAccountName: updatedPost.profileName,
+        originalContent: userFacingPostContent(updatedPost.content, activeCampaign, updatedPost),
+        feedbackText: updates.review.feedback
+      });
+    }
+  }
+
+  function updateCampaignPostFromReview(campaignId: string, postId: string, updates: Partial<GeneratedPost>) {
+    let updatedPost: GeneratedPost | undefined;
+    let variantNumber = 1;
+    setCampaigns((current) =>
+      current.map((campaign) => {
+        if (campaign.id !== campaignId) {
+          return campaign;
+        }
+
+        return {
+          ...campaign,
+          posts: campaign.posts.map((post, index) => {
+            if (post.id !== postId) {
+              return post;
+            }
+
+            updatedPost = { ...post, ...updates };
+            variantNumber =
+              campaign.posts
+                .slice(0, index + 1)
+                .filter((item) => item.platform === post.platform).length || 1;
+            return updatedPost;
+          })
+        };
+      })
+    );
+
+    if (storageMode === "supabase" && updatedPost) {
+      saveGeneratedPostToSupabase(campaignId, updatedPost, variantNumber).catch((error) => {
+        setQueueDebugMessage(
+          error instanceof Error
+            ? `Review metadata save failed: ${error.message}`
+            : "Review metadata save failed."
+        );
+        setGenerationNotice("Saved in this session. Shared sync needs attention.");
+      });
     }
   }
 
@@ -3008,12 +3786,16 @@ export function SocialCommandCenter() {
       profileName: campaign.profileName ?? post.profileName,
       campaignId: campaign.id,
       campaignName: campaign.name,
+      opportunityId: campaign.opportunityId,
+      opportunityTitle: campaign.opportunityTitle,
       generatedPostId: post.id,
       platform: post.platform,
       contentAngle: campaign.contentAngle,
       intent: campaign.intent,
       content: finalContent,
       postCopy: finalContent,
+      contentOrigin: post.contentOrigin ?? campaign.contentOrigin,
+      manualSourceContent: post.manualSourceContent ?? campaign.manualSourceContent,
       ...supportingFieldsFromPost(post),
       mediaUsed: Boolean(post.mediaUsed || campaign.mediaContext?.filename),
       mediaAssetId: campaign.mediaContext?.assetId,
@@ -3027,9 +3809,94 @@ export function SocialCommandCenter() {
       publishNotes: "",
       isSandbox: false,
       metrics: {},
+      review: post.review
+        ? {
+            ...post.review,
+            status: post.review.status === "Approved" ? "Ready to Post" : post.review.status,
+            reviewedAt: new Date().toISOString()
+          }
+        : {
+            status: "Ready to Post",
+            reviewerName: "Conduit / team",
+            reviewedAt: new Date().toISOString()
+          },
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString()
     } satisfies PostQueueItem;
+  }
+
+  function queueApprovedReply(opportunity: Opportunity, reply: OpportunityReplyDraft, approvedReply: string, profile?: Profile) {
+    const now = new Date().toISOString();
+    const safetyStatus: BrandSafetyCheck["status"] = reply.brandSafetyNotes.length > 0 ? "Needs review" : "Safe";
+    const item: PostQueueItem = {
+      id: `queue-reply-${reply.id}`,
+      contentType: "Reply",
+      profileId: profile?.id,
+      profileName: profile?.name || "Conduit",
+      campaignId: opportunity.relatedCampaignId || `opportunity-${opportunity.id}`,
+      campaignName: `Reply: ${opportunity.title}`,
+      opportunityId: opportunity.id,
+      opportunityTitle: opportunity.title,
+      generatedPostId: reply.id,
+      platform: reply.recommendedPlatform,
+      intent: `Reply to opportunity: ${opportunity.title}`,
+      content: approvedReply,
+      postCopy: approvedReply,
+      mediaUsed: false,
+      status: "Ready",
+      plannedAt: "",
+      livePostUrl: "",
+      postedAt: "",
+      publishNotes: "",
+      isSandbox: false,
+      metrics: {},
+      review: reply.review
+        ? {
+            ...reply.review,
+            status: "Ready to Reply",
+            reviewedAt: new Date().toISOString()
+          }
+        : {
+            status: "Ready to Reply",
+            reviewerName: profile?.name || "Conduit / team",
+            reviewedAt: now
+          },
+      safetyCheck: {
+        status: safetyStatus,
+        notes: reply.brandSafetyNotes.length > 0 ? reply.brandSafetyNotes : ["No obvious reply risks found."],
+        checkedAt: now,
+        source: "Fallback"
+      },
+      createdAt: now,
+      updatedAt: now
+    };
+
+    setPostQueue((current) => [
+      item,
+      ...current.filter((queueItem) => queueItem.generatedPostId !== item.generatedPostId)
+    ]);
+    recordActivity({
+      actionType: "Reply approved",
+      objectType: "Reply",
+      objectId: item.id,
+      title: "Reply approved and added to Ready to Reply",
+      summary: `${opportunity.title} is ready for manual reply execution.`,
+      destination: "Ready to Post",
+      status: "success"
+    });
+    setQueueDebugMessage(`Queued ${item.platform} reply from Opportunity Inbox. Queue item: ${item.id}.`);
+
+    if (storageMode === "supabase") {
+      savePostQueueItemToSupabase(item).catch((error) => {
+        persistLocalQueueFallback([item]);
+        const detail = error instanceof Error ? error.message : "Unknown reply queue save failure.";
+        setQueueDebugMessage(`Reply queue save failed. Local fallback saved. ${detail}`);
+      });
+    } else {
+      persistLocalQueueFallback([item]);
+    }
+
+    return item;
   }
 
   function moveApprovedToQueue(memory: ApprovedPostMemory) {
@@ -3070,6 +3937,15 @@ export function SocialCommandCenter() {
       queueItem,
       ...current.filter((item) => item.generatedPostId !== queueItem.generatedPostId)
     ]);
+    recordActivity({
+      actionType: "Item moved to Ready to Post",
+      objectType: "Post",
+      objectId: queueItem.id,
+      title: "Moved to Ready to Post",
+      summary: `${queueItem.campaignName} is ready for manual publishing.`,
+      destination: "Ready to Post",
+      status: "success"
+    });
     setGenerationNotice("Saved to Ready to Post");
     setQueueDebugMessage(`Queued approved post from Content Library: ${queueItem.id}.`);
 
@@ -3116,6 +3992,12 @@ export function SocialCommandCenter() {
     const updatedPost: GeneratedPost = {
       ...post,
       status: "approved",
+      review: {
+        ...(post.review ?? {}),
+        status: "Ready to Post",
+        reviewerName: post.review?.reviewerName || "Conduit / team",
+        reviewedAt: new Date().toISOString()
+      },
       safetyCheck: post.safetyCheck ?? runFallbackBrandSafetyCheck(userFacingPostContent(post.content, campaign, post), campaign, post)
     };
     const variantNumber =
@@ -3153,6 +4035,23 @@ export function SocialCommandCenter() {
         queueItem,
         ...current.filter((item) => item.generatedPostId !== post.id)
       ]);
+      recordActivity({
+        actionType: "Draft approved",
+        objectType: "Post",
+        objectId: queueItem.id,
+        title: "Draft approved and moved to Ready to Post",
+        summary: `${campaign.name} is ready for manual publishing on ${queueItem.platform}.`,
+        destination: "Ready to Post",
+        status: "success"
+      });
+      captureFeedbackMemory({
+        sourceType: "approval",
+        platform: updatedPost.platform,
+        postingAccountId: updatedPost.profileId ?? campaign.profileId,
+        postingAccountName: updatedPost.profileName ?? campaign.profileName,
+        revisedContent: userFacingPostContent(updatedPost.content, campaign, updatedPost),
+        feedbackText: "User approved this draft and moved it toward Ready to Post."
+      });
       console.info("[SCC] queue state updated", {
         id: queueItem.id,
         generatedPostId: queueItem.generatedPostId,
@@ -3275,6 +4174,168 @@ export function SocialCommandCenter() {
     }
   }
 
+  async function queuePostFromReview(campaign: Campaign, post: GeneratedPost) {
+    const nextReview: ReviewMetadata = {
+      ...(post.review ?? {}),
+      status: "Ready to Post",
+      reviewerName: post.review?.reviewerName || "Conduit / team",
+      reviewedAt: new Date().toISOString()
+    };
+    const updatedPost: GeneratedPost = {
+      ...post,
+      status: "approved",
+      review: nextReview,
+      safetyCheck: post.safetyCheck ?? runFallbackBrandSafetyCheck(userFacingPostContent(post.content, campaign, post), campaign, post)
+    };
+    const variantNumber =
+      campaign.posts
+        .slice(0, campaign.posts.findIndex((item) => item.id === post.id) + 1)
+        .filter((item) => item.platform === post.platform).length || 1;
+    const approvedMemory = createApprovedMemory(updatedPost, campaign);
+    const queueItem = createQueueItem(updatedPost, campaign);
+
+    setCampaigns((current) =>
+      current.map((item) =>
+        item.id === campaign.id
+          ? {
+              ...item,
+              posts: item.posts.map((campaignPost) =>
+                campaignPost.id === post.id ? updatedPost : campaignPost
+              )
+            }
+          : item
+      )
+    );
+    if (approvedMemory) {
+      setApprovedPosts((current) => [
+        approvedMemory,
+        ...current.filter((item) => item.generatedPostId !== post.id)
+      ]);
+    }
+    setPostQueue((current) => [
+      queueItem,
+      ...current.filter((item) => item.generatedPostId !== post.id)
+    ]);
+    captureFeedbackMemory({
+      sourceType: "approval",
+      platform: updatedPost.platform,
+      postingAccountId: updatedPost.profileId ?? campaign.profileId,
+      postingAccountName: updatedPost.profileName ?? campaign.profileName,
+      revisedContent: userFacingPostContent(updatedPost.content, campaign, updatedPost),
+      feedbackText: "Founder/team approved this draft and moved it to Ready to Post."
+    });
+    setQueueDebugMessage(
+      `Queued ${queueItem.platform} post from Review Queue. Queue item: ${queueItem.id}.`
+    );
+    setGenerationNotice(friendlyApprovalMessage("saved"));
+
+    if (storageMode === "supabase") {
+      try {
+        await saveGeneratedPostToSupabase(campaign.id, updatedPost, variantNumber);
+        if (approvedMemory) {
+          await saveApprovedPostToSupabase(approvedMemory);
+        }
+        await savePostQueueItemToSupabase(queueItem);
+      } catch (error) {
+        persistLocalQueueFallback([queueItem]);
+        if (approvedMemory) persistLocalApprovedFallback([approvedMemory]);
+        setGenerationNotice(friendlyApprovalMessage("local"));
+        setQueueDebugMessage(
+          error instanceof Error
+            ? `Review Queue move-to-ready fell back locally: ${error.message}`
+            : "Review Queue move-to-ready fell back locally."
+        );
+      }
+    } else {
+      if (approvedMemory) persistLocalApprovedFallback([approvedMemory]);
+      persistLocalQueueFallback([queueItem]);
+    }
+  }
+
+  async function sendPostToManagerReview(campaign: Campaign, post: GeneratedPost) {
+    const now = new Date().toISOString();
+    const nextReview: ReviewMetadata = {
+      ...(post.review ?? {}),
+      status: "Sent for review",
+      reviewerName: post.review?.reviewerName || "Manager",
+      feedback: post.review?.feedback || "",
+      requestedAt: now
+    };
+    const updatedPost: GeneratedPost = {
+      ...post,
+      review: nextReview,
+      safetyCheck: post.safetyCheck ?? runFallbackBrandSafetyCheck(userFacingPostContent(post.content, campaign, post), campaign, post)
+    };
+    const variantNumber =
+      campaign.posts
+        .slice(0, campaign.posts.findIndex((item) => item.id === post.id) + 1)
+        .filter((item) => item.platform === post.platform).length || 1;
+    const queueItem: PostQueueItem = {
+      ...createQueueItem(updatedPost, campaign),
+      status: "Ready",
+      hiddenFromQueue: true,
+      managerReviewOnly: true,
+      review: nextReview,
+      updatedAt: now
+    };
+
+    setCampaigns((current) =>
+      current.map((item) =>
+        item.id === campaign.id
+          ? {
+              ...item,
+              posts: item.posts.map((campaignPost) =>
+                campaignPost.id === post.id ? updatedPost : campaignPost
+              )
+            }
+          : item
+      )
+    );
+    setPostQueue((current) => [
+      queueItem,
+      ...current.filter((item) => item.generatedPostId !== post.id)
+    ]);
+
+    const link = createManagerReviewLink({
+      scopeType: "Selected posts/replies",
+      scope: { itemIds: [queueItem.id] },
+      permissionLevel: "Can approve/request changes",
+      expiresAt: reviewExpirationIso("14")
+    });
+    const url = managerReviewUrl(link.token);
+
+    recordActivity({
+      actionType: "Sent to manager review",
+      objectType: "Post",
+      objectId: queueItem.id,
+      title: "Sent to manager review",
+      summary: `${campaign.name} was sent for manager feedback on ${post.platform}.`,
+      destination: "Manager Review",
+      status: "success",
+      metadata: { reviewLinkId: link.id, url }
+    });
+    setGenerationNotice("Sent to manager for feedback. Share link created.");
+    setQueueDebugMessage(`Manager review link created for ${queueItem.id}.`);
+
+    if (storageMode === "supabase") {
+      try {
+        await saveGeneratedPostToSupabase(campaign.id, updatedPost, variantNumber);
+        await savePostQueueItemToSupabase(queueItem);
+      } catch (error) {
+        persistLocalQueueFallback([queueItem]);
+        setQueueDebugMessage(
+          error instanceof Error
+            ? `Manager review sync fell back locally: ${error.message}`
+            : "Manager review sync fell back locally."
+        );
+      }
+    } else {
+      persistLocalQueueFallback([queueItem]);
+    }
+
+    return url;
+  }
+
   function rememberApprovedPost(post: GeneratedPost) {
     const campaign = activeCampaign;
     const profileId = campaign?.profileId ?? post.profileId;
@@ -3323,6 +4384,8 @@ export function SocialCommandCenter() {
       profileName: campaign.profileName ?? post.profileName,
       campaignId: campaign.id,
       campaignName: campaign.name,
+      opportunityId: campaign.opportunityId,
+      opportunityTitle: campaign.opportunityTitle,
       generatedPostId: post.id,
       platform: post.platform,
       contentAngle: campaign.contentAngle,
@@ -3451,49 +4514,68 @@ export function SocialCommandCenter() {
     const generationImageDataUrl = imageDataUrlForGeneration(activeCampaign.mediaContext, mediaImageDataUrl);
 
     try {
-      const response = await fetch("/api/generate", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json"
-        },
-        body: JSON.stringify({
-          mode: "regenerate",
-          campaignTitle: activeCampaign.name,
-          intent: activeCampaign.intent ?? "",
-          campaignTemplate: activeCampaign.campaignTemplate ?? "",
-          contentAngle: activeCampaign.contentAngle ?? "",
-          simpleStyleChips: activeCampaign.simpleStyleChips ?? [],
-          simpleStyleInstructions: activeCampaign.simpleStyleInstructions ?? [],
-          rawIdea: activeCampaign.idea,
-          selectedPlatforms: [post.platform],
-          profile: selectedProfile,
-          brandVoice,
-          sourceLibraryItems: selectedLibrarySources,
-          mediaContext:
-            activeCampaign.mediaContext
-              ? {
-                  ...activeCampaign.mediaContext,
-                  imageDataUrl: generationImageDataUrl
-                }
-              : undefined,
-          regeneration: {
-            platform: post.platform,
-            currentContent: userFacingPostContent(post.content, activeCampaign, post),
-            instruction: instruction.trim()
-          }
-        })
-      });
+      const response = await withTimeout(
+        fetch("/api/generate", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json"
+          },
+          body: JSON.stringify({
+            mode: "regenerate",
+            campaignTitle: activeCampaign.name,
+            intent: activeCampaign.intent ?? "",
+            campaignTemplate: activeCampaign.campaignTemplate ?? "",
+            contentAngle: activeCampaign.contentAngle ?? "",
+            simpleStyleChips: activeCampaign.simpleStyleChips ?? [],
+            simpleStyleInstructions: activeCampaign.simpleStyleInstructions ?? [],
+            rawIdea: activeCampaign.idea,
+            selectedPlatforms: [post.platform],
+            profile: selectedProfile,
+            brandVoice,
+            feedbackMemory: feedbackMemorySummary(feedbackMemory, useFeedbackMemory),
+            sourceLibraryItems: selectedLibrarySources,
+            mediaContext:
+              activeCampaign.mediaContext
+                ? {
+                    ...activeCampaign.mediaContext,
+                    imageDataUrl: generationImageDataUrl
+                  }
+                : undefined,
+            regeneration: {
+              platform: post.platform,
+              currentContent: userFacingPostContent(post.content, activeCampaign, post),
+              instruction: instruction.trim()
+            }
+          })
+        }),
+        30000,
+        "AI regeneration took too long. Mock fallback was used."
+      );
       const payload = await readJsonResponse(response, "OpenAI regeneration failed");
 
       if (payload?.fallbackReason === "missing_api_key") {
         const mockPackage = createMockRegeneratedPost(post, instruction);
-        const mockPost = { ...post, ...mockPackage, generatedBy: "Mock" as const };
+        const contentOrigin: ContentOrigin =
+          post.contentOrigin === "Manually written" || post.contentOrigin === "AI-improved from manual draft"
+            ? "AI-improved from manual draft"
+            : post.contentOrigin ?? "AI-generated";
+        const mockPost = { ...post, ...mockPackage, generatedBy: "Mock" as const, contentOrigin };
         updatePost(post.id, {
           previousContent: post.content,
           previousPostCopy: userFacingPostContent(post.content, activeCampaign, post),
           ...mockPackage,
           generatedBy: "Mock",
+          contentOrigin,
           safetyCheck: runFallbackBrandSafetyCheck(mockPackage.postCopy ?? mockPackage.content, activeCampaign, mockPost)
+        });
+        captureFeedbackMemory({
+          sourceType: "regenerate",
+          platform: post.platform,
+          postingAccountId: post.profileId ?? activeCampaign.profileId,
+          postingAccountName: post.profileName ?? activeCampaign.profileName,
+          originalContent: userFacingPostContent(post.content, activeCampaign, post),
+          revisedContent: mockPackage.postCopy ?? mockPackage.content,
+          feedbackText: instruction.trim()
         });
         return;
       }
@@ -3511,23 +4593,51 @@ export function SocialCommandCenter() {
         throw new Error("OpenAI returned no regenerated post.");
       }
 
-      const nextPost = { ...post, ...nextPackage, generatedBy: "AI" as const };
+      const contentOrigin: ContentOrigin =
+        post.contentOrigin === "Manually written" || post.contentOrigin === "AI-improved from manual draft"
+          ? "AI-improved from manual draft"
+          : post.contentOrigin ?? "AI-generated";
+      const nextPost = { ...post, ...nextPackage, generatedBy: "AI" as const, contentOrigin };
       updatePost(post.id, {
         previousContent: post.content,
         previousPostCopy: userFacingPostContent(post.content, activeCampaign, post),
         ...nextPackage,
         generatedBy: "AI",
+        contentOrigin,
         safetyCheck: runFallbackBrandSafetyCheck(nextPackage.postCopy ?? nextPackage.content, activeCampaign, nextPost)
+      });
+      captureFeedbackMemory({
+        sourceType: "regenerate",
+        platform: post.platform,
+        postingAccountId: post.profileId ?? activeCampaign.profileId,
+        postingAccountName: post.profileName ?? activeCampaign.profileName,
+        originalContent: userFacingPostContent(post.content, activeCampaign, post),
+        revisedContent: nextPackage.postCopy ?? nextPackage.content,
+        feedbackText: instruction.trim()
       });
     } catch {
       const mockPackage = createMockRegeneratedPost(post, instruction);
-      const mockPost = { ...post, ...mockPackage, generatedBy: "Mock" as const };
+      const contentOrigin: ContentOrigin =
+        post.contentOrigin === "Manually written" || post.contentOrigin === "AI-improved from manual draft"
+          ? "AI-improved from manual draft"
+          : post.contentOrigin ?? "AI-generated";
+      const mockPost = { ...post, ...mockPackage, generatedBy: "Mock" as const, contentOrigin };
       updatePost(post.id, {
         previousContent: post.content,
         previousPostCopy: userFacingPostContent(post.content, activeCampaign, post),
         ...mockPackage,
         generatedBy: "Mock",
+        contentOrigin,
         safetyCheck: runFallbackBrandSafetyCheck(mockPackage.postCopy ?? mockPackage.content, activeCampaign, mockPost)
+      });
+      captureFeedbackMemory({
+        sourceType: "regenerate",
+        platform: post.platform,
+        postingAccountId: post.profileId ?? activeCampaign.profileId,
+        postingAccountName: post.profileName ?? activeCampaign.profileName,
+        originalContent: userFacingPostContent(post.content, activeCampaign, post),
+        revisedContent: mockPackage.postCopy ?? mockPackage.content,
+        feedbackText: instruction.trim()
       });
     } finally {
       setRegeneratingPostId("");
@@ -3544,6 +4654,177 @@ export function SocialCommandCenter() {
       );
       setGenerationNotice("Saved in this session. Shared sync needs attention.");
     });
+  }
+
+  function persistActivity(item: ActivityLogItem) {
+    if (storageMode !== "supabase") return;
+    saveActivityLogToSupabase(item).catch((error) => {
+      setQueueDebugMessage(
+        error instanceof Error
+          ? `Activity Log sync failed: ${error.message}`
+          : "Activity Log sync failed."
+      );
+    });
+  }
+
+  function persistReviewLink(link: ReviewLink) {
+    if (storageMode !== "supabase") return;
+    saveReviewLinkToSupabase(link).catch((error) => {
+      setQueueDebugMessage(
+        error instanceof Error
+          ? `Review link sync failed: ${error.message}`
+          : "Review link sync failed."
+      );
+    });
+  }
+
+  function persistReviewFeedback(feedback: ReviewFeedback) {
+    if (storageMode !== "supabase") return;
+    saveReviewFeedbackToSupabase(feedback).catch((error) => {
+      setQueueDebugMessage(
+        error instanceof Error
+          ? `Review feedback sync failed: ${error.message}`
+          : "Review feedback sync failed."
+      );
+    });
+  }
+
+  function resolveManagerFeedback(feedbackId: string) {
+    const resolvedFeedback = reviewFeedback.find((feedback) => feedback.id === feedbackId);
+    if (!resolvedFeedback) return;
+
+    const updatedFeedback: ReviewFeedback = {
+      ...resolvedFeedback,
+      status: "resolved"
+    };
+
+    setReviewFeedback((current) =>
+      current.map((feedback) => (feedback.id === feedbackId ? updatedFeedback : feedback))
+    );
+    persistReviewFeedback(updatedFeedback);
+    recordActivity({
+      actionType: "Manager feedback resolved",
+      objectType: updatedFeedback.contentType,
+      objectId: updatedFeedback.contentId,
+      title: "Manager feedback resolved",
+      summary: `${updatedFeedback.reviewerName}'s feedback was marked resolved.`,
+      destination: "Ready to Post",
+      status: "success"
+    });
+  }
+
+  function recordActivity(input: Omit<ActivityLogItem, "id" | "createdAt" | "userEmail" | "workspaceName">) {
+    const item: ActivityLogItem = {
+      id: `activity-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+      createdAt: new Date().toISOString(),
+      userEmail: authUserEmail,
+      workspaceName: workspace?.name,
+      ...input
+    };
+    setActivityLog((current) => [item, ...current.filter((activity) => activity.id !== item.id)].slice(0, 100));
+    persistActivity(item);
+    if (input.status === "success") {
+      setGenerationNotice(input.summary);
+    }
+    return item;
+  }
+
+  function createManagerReviewLink(input: {
+    scopeType: ReviewLinkScopeType;
+    scope: ReviewLink["scope"];
+    permissionLevel: ReviewPermissionLevel;
+    expiresAt?: string;
+  }) {
+    const link: ReviewLink = {
+      id: `review-link-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+      token: generateReviewToken(),
+      scopeType: input.scopeType,
+      scope: input.scope,
+      permissionLevel: input.permissionLevel,
+      expiresAt: input.expiresAt,
+      createdBy: authUserEmail,
+      createdAt: new Date().toISOString()
+    };
+    setReviewLinks((current) => [link, ...current]);
+    persistReviewLink(link);
+    recordActivity({
+      actionType: "Review link created",
+      objectType: "Review link",
+      objectId: link.id,
+      title: "Manager review link created",
+      summary: `${link.scopeType} review link created with ${link.permissionLevel} permission.`,
+      destination: "Manager Review",
+      status: "success"
+    });
+    return link;
+  }
+
+  function disableManagerReviewLink(id: string) {
+    const disabledAt = new Date().toISOString();
+    let disabledLink: ReviewLink | undefined;
+    setReviewLinks((current) =>
+      current.map((link) => {
+        if (link.id !== id) return link;
+        disabledLink = { ...link, disabledAt };
+        return disabledLink;
+      })
+    );
+    if (disabledLink) {
+      persistReviewLink(disabledLink);
+      recordActivity({
+        actionType: "Review link disabled",
+        objectType: "Review link",
+        objectId: disabledLink.id,
+        title: "Manager review link disabled",
+        summary: `${disabledLink.scopeType} review link was disabled.`,
+        destination: "Manager Review",
+        status: "success"
+      });
+    }
+  }
+
+  function undoLastActivity() {
+    const item = activityLog.find((activity) => activity.undo);
+    if (!item?.undo) {
+      setGenerationNotice("No recent action can be undone.");
+      return;
+    }
+
+    const undoType = item.undo.type;
+    const payload = item.undo.payload as any;
+    if (undoType === "queue-item-restore" && payload?.item) {
+      const previousItem = payload.item as PostQueueItem;
+      setPostQueue((current) => [previousItem, ...current.filter((queueItem) => queueItem.id !== previousItem.id)]);
+      if (storageMode === "supabase") {
+        savePostQueueItemToSupabase(previousItem).catch(() => undefined);
+      }
+    } else if (undoType === "queue-bulk-restore" && Array.isArray(payload?.items)) {
+      const previousItems = payload.items as PostQueueItem[];
+      setPostQueue((current) => mergeById(previousItems, current));
+      if (storageMode === "supabase") {
+        previousItems.forEach((queueItem) => savePostQueueItemToSupabase(queueItem).catch(() => undefined));
+      }
+    } else if (undoType === "capture-status" && payload?.id && payload?.status) {
+      const previous = sourceCaptures.find((capture) => capture.id === payload.id);
+      if (previous) {
+        const restored = { ...previous, status: payload.status as SourceCapture["status"], updatedAt: new Date().toISOString() };
+        setSourceCaptures((current) => current.map((capture) => capture.id === restored.id ? restored : capture));
+        persistSourceCapture(restored);
+      }
+    } else if (undoType === "opportunity-status" && payload?.id && payload?.status) {
+      const previous = opportunities.find((opportunity) => opportunity.id === payload.id);
+      if (previous) {
+        const restored = { ...previous, status: payload.status as OpportunityStatus, updatedAt: new Date().toISOString() };
+        setOpportunities((current) => current.map((opportunity) => opportunity.id === restored.id ? restored : opportunity));
+        persistOpportunity(restored);
+      }
+    } else {
+      setGenerationNotice("That activity cannot be undone.");
+      return;
+    }
+
+    setActivityLog((current) => current.filter((activity) => activity.id !== item.id));
+    setGenerationNotice(`Undid: ${item.title}`);
   }
 
   function removeProfile(profileId: string) {
@@ -3567,6 +4848,54 @@ export function SocialCommandCenter() {
           : "Company Knowledge save failed."
       );
       setGenerationNotice("Saved in this session. Shared sync needs attention.");
+    });
+  }
+
+  function persistOpportunity(opportunity: Opportunity) {
+    if (storageMode !== "supabase") return;
+    saveOpportunityToSupabase(opportunity).catch((error) => {
+      setQueueDebugMessage(
+        error instanceof Error
+          ? `Opportunity save failed: ${error.message}`
+          : "Opportunity save failed."
+      );
+      setGenerationNotice("Saved in this session. Shared sync needs attention.");
+    });
+  }
+
+  function persistSourceCapture(capture: SourceCapture) {
+    if (storageMode !== "supabase") return;
+    saveSourceCaptureToSupabase(capture).catch((error) => {
+      setQueueDebugMessage(
+        error instanceof Error
+          ? `Capture save failed: ${error.message}`
+          : "Capture save failed."
+      );
+      setGenerationNotice("Capture saved locally. Shared sync needs attention.");
+    });
+  }
+
+  function persistClaimLibraryItem(item: ClaimLibraryItem) {
+    if (storageMode !== "supabase") return;
+    saveClaimLibraryItemToSupabase(item).catch((error) => {
+      setQueueDebugMessage(
+        error instanceof Error
+          ? `Claim Library save failed: ${error.message}`
+          : "Claim Library save failed."
+      );
+      setGenerationNotice("Claim saved in this session. Shared sync needs attention.");
+    });
+  }
+
+  function removeSourceCapture(captureId: string) {
+    setSourceCaptures((current) => current.filter((capture) => capture.id !== captureId));
+    if (storageMode !== "supabase") return;
+    deleteSourceCaptureFromSupabase(captureId).catch((error) => {
+      setQueueDebugMessage(
+        error instanceof Error
+          ? `Capture delete failed: ${error.message}`
+          : "Capture delete failed."
+      );
     });
   }
 
@@ -3603,10 +4932,20 @@ export function SocialCommandCenter() {
   }
 
   function removeMediaAsset(assetId: string) {
+    const asset = mediaAssets.find((item) => item.id === assetId);
     setMediaAssets((current) => current.filter((asset) => asset.id !== assetId));
     if (selectedMediaAssetId === assetId) {
       setSelectedMediaAssetId("");
     }
+    recordActivity({
+      actionType: "Media asset deleted",
+      objectType: "Media Asset",
+      objectId: assetId,
+      title: "Media asset deleted",
+      summary: `${asset?.filename || "Media asset"} was removed from Media Library.`,
+      destination: "Media Library",
+      status: "success"
+    });
     if (storageMode === "supabase") {
       deleteMediaAssetFromSupabase(assetId).catch((error) => {
         setQueueDebugMessage(
@@ -3630,6 +4969,18 @@ export function SocialCommandCenter() {
     });
   }
 
+  function removeClaimLibraryItem(claimId: string) {
+    if (storageMode !== "supabase") return;
+    deleteClaimLibraryItemFromSupabase(claimId).catch((error) => {
+      setQueueDebugMessage(
+        error instanceof Error
+          ? `Claim Library delete failed: ${error.message}`
+          : "Claim Library delete failed."
+      );
+      setGenerationNotice("Claim removed from this session. Shared sync needs attention.");
+    });
+  }
+
   function persistBrandRules(nextBrandVoice: BrandVoiceProfile) {
     if (storageMode !== "supabase") return;
     saveBrandRulesToSupabase(nextBrandVoice).catch((error) => {
@@ -3642,8 +4993,115 @@ export function SocialCommandCenter() {
     });
   }
 
+  function saveBrandVoiceRules(nextBrandVoice: BrandVoiceProfile) {
+    if (storageMode === "supabase") {
+      persistBrandRules(nextBrandVoice);
+      return;
+    }
+
+    writeLocalValue(storageKeys.brandVoice, nextBrandVoice);
+  }
+
+  function toggleFeedbackMemoryUsage(value: boolean) {
+    setUseFeedbackMemory(value);
+    writeLocalValue(storageKeys.useFeedbackMemory, value);
+  }
+
+  function persistFeedbackMemory(item: FeedbackMemoryItem) {
+    if (storageMode === "supabase") {
+      saveFeedbackMemoryToSupabase(item).catch((error) => {
+        setQueueDebugMessage(
+          error instanceof Error
+            ? `Feedback Memory save failed: ${error.message}`
+            : "Feedback Memory save failed."
+        );
+      });
+    } else {
+      writeLocalValue(storageKeys.feedbackMemory, [
+        item,
+        ...feedbackMemory.filter((memory) => memory.id !== item.id)
+      ].slice(0, 100));
+    }
+  }
+
+  function captureFeedbackMemory(input: {
+    sourceType: FeedbackMemorySourceType;
+    platform?: Platform;
+    postingAccountId?: string;
+    postingAccountName?: string;
+    originalContent?: string;
+    revisedContent?: string;
+    feedbackText?: string;
+    metadata?: Record<string, unknown>;
+  }) {
+    const inferredPreference = inferFeedbackPreference(input);
+    if (!inferredPreference) return;
+    const item: FeedbackMemoryItem = {
+      id: `feedback-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+      sourceType: input.sourceType,
+      platform: input.platform,
+      postingAccountId: input.postingAccountId,
+      postingAccountName: input.postingAccountName,
+      originalContent: input.originalContent,
+      revisedContent: input.revisedContent,
+      feedbackText: input.feedbackText,
+      inferredPreference,
+      metadata: input.metadata ?? {},
+      createdAt: new Date().toISOString()
+    };
+    setFeedbackMemory((current) => {
+      const next = [item, ...current].slice(0, 100);
+      if (storageMode !== "supabase") {
+        writeLocalValue(storageKeys.feedbackMemory, next);
+      }
+      return next;
+    });
+    persistFeedbackMemory(item);
+    recordActivity({
+      actionType: "Feedback Memory captured",
+      objectType: "Feedback Memory",
+      objectId: item.id,
+      title: "Feedback Memory captured",
+      summary: inferredPreference,
+      destination: "Brand Voice Rules",
+      status: "success"
+    });
+  }
+
+  function updateFeedbackMemoryItem(id: string, updates: Partial<FeedbackMemoryItem>) {
+    let nextItem: FeedbackMemoryItem | undefined;
+    setFeedbackMemory((current) => {
+      const next = current.map((item) => {
+        if (item.id !== id) return item;
+        nextItem = { ...item, ...updates };
+        return nextItem;
+      });
+      if (storageMode !== "supabase") {
+        writeLocalValue(storageKeys.feedbackMemory, next);
+      }
+      return next;
+    });
+    if (storageMode === "supabase" && nextItem) {
+      saveFeedbackMemoryToSupabase(nextItem).catch(() => undefined);
+    }
+  }
+
+  function deleteFeedbackMemoryItem(id: string) {
+    setFeedbackMemory((current) => {
+      const next = current.filter((item) => item.id !== id);
+      if (storageMode !== "supabase") {
+        writeLocalValue(storageKeys.feedbackMemory, next);
+      }
+      return next;
+    });
+    if (storageMode === "supabase") {
+      deleteFeedbackMemoryFromSupabase(id).catch(() => undefined);
+    }
+  }
+
   async function handleAuthSubmit(email: string, password: string, mode: "sign-in" | "sign-up") {
     setAuthLoading(true);
+    setWorkspaceConnectionError("");
     try {
       const user =
         mode === "sign-up"
@@ -3652,23 +5110,8 @@ export function SocialCommandCenter() {
       if (!user) {
         throw new Error("Check your email to confirm your account, then sign in.");
       }
-      const workspaceContext = await getOrCreateDefaultWorkspace();
-      const data = await loadSupabaseData(workspaceContext.id);
       setAuthUserEmail(user.email ?? email);
-      setWorkspace(workspaceContext);
-      setCampaigns(data.campaigns);
-      setActiveCampaignId(data.campaigns[0]?.id ?? "");
-      setProfiles(data.profiles);
-      setSelectedProfileId(findDefaultPostingAccount(data.profiles)?.id ?? data.profiles[0]?.id ?? "");
-      setLibrarySources(data.librarySources);
-      setMediaAssets(data.mediaAssets);
-      setSelectedLibrarySourceIds(data.librarySources[0] ? [data.librarySources[0].id] : []);
-      setBrandVoice(data.brandVoice ?? defaultBrandVoice);
-      setApprovedPosts(data.approvedPosts);
-      setRejectedPosts(data.rejectedPosts);
-      setPostQueue(mergeById(data.postQueue, readLocalValue<PostQueueItem[]>(storageKeys.postQueue, [])));
-      setStorageMode("supabase");
-      setHasLoadedLocalData(true);
+      await loadSupabaseWorkspaceWithRetry();
       setGenerationNotice("");
     } finally {
       setAuthLoading(false);
@@ -3679,7 +5122,10 @@ export function SocialCommandCenter() {
     await signOutOfSupabase();
     setAuthUserEmail("");
     setWorkspace(null);
+    setWorkspaceConnectionError("");
+    setWorkspaceConnectionAttempt(0);
     setHasLoadedLocalData(false);
+    setStorageMode(appUsesSupabase() ? "supabase" : "local");
     setCampaigns([]);
     setProfiles([]);
     setLibrarySources([]);
@@ -3687,6 +5133,17 @@ export function SocialCommandCenter() {
     setRejectedPosts([]);
     setPostQueue([]);
     setMediaAssets([]);
+    setInspirationPatterns([]);
+    setOpportunities([]);
+    setFeedbackMemory([]);
+    setSourceInboxHistory([]);
+    setReviewLinks([]);
+    setReviewFeedback([]);
+  }
+
+  function openReviewQueue(filter: ReviewQueueFilter = "All drafts") {
+    setReviewQueueFilterPreset(filter);
+    setScreen("Review Drafts");
   }
 
   if (authLoading && appUsesSupabase()) {
@@ -3695,8 +5152,35 @@ export function SocialCommandCenter() {
         <Card className="w-full max-w-md p-6 text-center">
           <h1 className="text-xl font-bold">Conduit Social Command Center</h1>
           <p className="mt-2 text-sm text-muted-foreground">Checking your workspace...</p>
+          {workspaceConnectionAttempt > 0 && (
+            <p className="mt-3 text-xs font-bold uppercase tracking-wide text-muted-foreground">
+              Workspace connection attempt {workspaceConnectionAttempt} of 2
+            </p>
+          )}
+          <div className="mt-5 rounded-lg border border-slate-200 bg-slate-50 p-3 text-left text-sm text-muted-foreground">
+            If this takes more than a few seconds, retry the shared workspace or continue in local browser mode. Local mode will not delete or overwrite Supabase data.
+          </div>
+          <div className="mt-4 grid gap-2 sm:grid-cols-2">
+            <Button size="sm" onClick={loadSupabaseWorkspaceWithRetry}>
+              Retry workspace
+            </Button>
+            <Button size="sm" variant="secondary" onClick={() => loadLocalData("You chose local browser mode. Shared workspace data was not changed.")}>
+              Use local mode
+            </Button>
+          </div>
         </Card>
       </main>
+    );
+  }
+
+  if (appUsesSupabase() && workspaceConnectionError) {
+    return (
+      <WorkspaceConnectionIssueScreen
+        error={workspaceConnectionError}
+        userEmail={authUserEmail}
+        onRetry={loadSupabaseWorkspaceWithRetry}
+        onUseLocalMode={() => loadLocalData("You chose local browser mode. Shared workspace data was not changed.")}
+      />
     );
   }
 
@@ -3705,15 +5189,36 @@ export function SocialCommandCenter() {
       <LoginScreen
         onSubmit={handleAuthSubmit}
         missingEnv={[...supabaseStatus.missingClient, ...supabaseStatus.missingServer]}
+        onUseLocalMode={() => loadLocalData("You chose local browser mode from the sign-in screen. Shared workspace data was not changed.")}
       />
     );
   }
 
+  const demoCampaignIds = new Set(campaigns.filter(isDemoLikeRecord).map((campaign) => campaign.id));
+  const demoProfileIds = new Set(profiles.filter(isDemoLikeRecord).map((profile) => profile.id));
+  const visibleCampaigns = showDemoData ? campaigns : campaigns.filter((campaign) => !isDemoLikeRecord(campaign));
+  const visibleProfiles = showDemoData ? profiles : profiles.filter((profile) => !isDemoLikeRecord(profile));
+  const visibleLibrarySources = showDemoData ? librarySources : librarySources.filter((source) => !isDemoLikeRecord(source));
+  const visibleApprovedPosts = showDemoData
+    ? approvedPosts
+    : approvedPosts.filter((memory) => !isDemoLikeRecord(memory) && !demoCampaignIds.has(memory.campaignId) && !demoProfileIds.has(memory.profileId));
+  const visiblePostQueue = showDemoData
+    ? postQueue
+    : postQueue.filter((item) => !isDemoLikeRecord(item) && !demoCampaignIds.has(item.campaignId) && !demoProfileIds.has(item.profileId ?? ""));
+  const visibleClaimLibrary = showDemoData
+    ? claimLibrary
+    : claimLibrary.filter((claim) => !isDemoLikeRecord({ id: claim.id, claimText: claim.claimText }));
+
   return (
     <main className="min-h-screen">
-      <div className="mx-auto flex w-full max-w-[1520px] flex-col gap-5 px-4 py-4 lg:flex-row lg:px-5">
-        <aside className="lg:sticky lg:top-4 lg:h-[calc(100vh-32px)] lg:w-72">
-          <div className="flex h-full flex-col rounded-lg border border-slate-200/80 bg-white/95 p-4 shadow-[0_18px_50px_rgba(15,23,42,0.08)] backdrop-blur">
+      <CommandBar
+        open={commandBarOpen}
+        onOpenChange={setCommandBarOpen}
+        onRunAction={runQuickAction}
+      />
+      <div className="mx-auto flex w-full max-w-screen-2xl flex-col gap-5 px-4 py-4 lg:flex-row lg:px-5">
+        <aside className="lg:sticky lg:top-4 lg:h-[calc(100vh-2rem)] lg:w-72">
+          <div className="flex h-full flex-col rounded-lg border border-slate-200/80 bg-white/95 p-4 shadow-panel backdrop-blur">
             <div className="mb-7">
               <div className="flex items-center gap-3">
                 {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -3727,16 +5232,23 @@ export function SocialCommandCenter() {
                     Conduit Social Command Center
                   </h1>
                   <p className="text-xs leading-5 text-slate-500">
-                    Create, preview, approve, and track social posts.
+                    Capture, create, review, publish, and learn.
                   </p>
                 </div>
               </div>
+              <Button className="mt-4 w-full justify-center" onClick={() => setCommandBarOpen(true)}>
+                <Plus size={16} /> Quick actions
+              </Button>
+              <p className="mt-2 text-center text-xs font-semibold text-slate-400">
+                Press ⌘K / Ctrl+K
+              </p>
             </div>
 
-            <nav className="grid gap-5">
+            <nav className="min-h-0 flex-1 overflow-y-auto pr-1">
+              <div className="grid gap-5 pb-4">
               {navSections.map((section) => (
                 <div key={section.title}>
-                  <p className="mb-2 px-3 text-[10px] font-extrabold uppercase tracking-[0.14em] text-slate-400">
+                  <p className="mb-2 px-3 text-xs font-extrabold uppercase tracking-widest text-slate-400">
                     {section.title}
                   </p>
                   <div className="grid gap-1">
@@ -3760,9 +5272,10 @@ export function SocialCommandCenter() {
                   </div>
                 </div>
               ))}
+              </div>
             </nav>
 
-            <div className="mt-auto rounded-lg border border-teal-100 bg-teal-50/70 p-3 text-sm text-slate-700">
+            <div className="mt-4 shrink-0 rounded-lg border border-teal-100 bg-teal-50/70 p-3 text-sm text-slate-700">
               <p className="font-semibold">
                 {storageMode === "supabase" ? "Shared data connected" : "Local mode"}
               </p>
@@ -3807,41 +5320,157 @@ export function SocialCommandCenter() {
         <section className="min-w-0 flex-1">
           <Header screen={screen} activeCampaign={activeCampaign} />
           {screen === "Dashboard" && (
-            <Dashboard
-              campaigns={campaigns}
+            <DashboardScreen
+              campaigns={visibleCampaigns}
               activeCampaignId={activeCampaignId}
               setActiveCampaignId={setActiveCampaignId}
               setScreen={setScreen}
               deleteCampaign={deleteCampaign}
               repurposeCampaign={openRepurposeCampaign}
               resetLocalData={handleResetLocalData}
-              approvedCount={approvedCount}
-              rejectedCount={rejectedCount}
-              draftCount={draftCount}
-              profileCount={profiles.length}
-              librarySourceCount={librarySources.length}
-              readyQueueCount={readyQueueCount}
+              approvedCount={visibleCampaigns.reduce((total, campaign) => total + campaign.posts.filter((post) => post.status === "approved").length, 0)}
+              rejectedCount={visibleCampaigns.reduce((total, campaign) => total + campaign.posts.filter((post) => post.status === "rejected").length, 0)}
+              draftCount={visibleCampaigns.reduce((total, campaign) => total + campaign.posts.filter((post) => post.status === "draft").length, 0)}
+              profileCount={visibleProfiles.length}
+              profiles={visibleProfiles}
+              brandVoice={brandVoice}
+              librarySourceCount={visibleLibrarySources.length}
+              readyQueueCount={visiblePostQueue.filter((item) => normalizeQueueStatus(item.status) === "Ready").length}
+              opportunities={opportunities}
+              postQueue={visiblePostQueue}
+              librarySources={visibleLibrarySources}
+              mediaAssets={mediaAssets}
+              sourceInboxHistory={sourceInboxHistory}
+              sourceCaptures={sourceCaptures}
+              activityLog={activityLog}
+              reviewFeedback={reviewFeedback}
+              undoLastActivity={undoLastActivity}
+              socialConnections={socialConnections}
+              applyMediaAsset={applyMediaAsset}
+              setCampaignName={setCampaignName}
+              setIntent={setIntent}
+              setIdea={setIdea}
+              setSelectedPlatforms={setSelectedPlatforms}
+              setContentAngle={setContentAngle}
+              setSimpleStyleChips={setSimpleStyleChips}
               storageMode={storageMode}
               loadDemoData={loadDemoData}
               clearDemoData={clearDemoData}
+              showDemoData={showDemoData}
+              hideDemoData={hideDemoData}
+              showDemoDataAgain={showDemoDataAgain}
               startNewPost={startNewPost}
+              openReviewQueue={openReviewQueue}
             />
           )}
           {screen === "Analytics" && (
-            <Analytics postQueue={postQueue} setScreen={setScreen} />
+            <AnalyticsScreen
+              postQueue={visiblePostQueue}
+              campaigns={visibleCampaigns}
+              librarySources={visibleLibrarySources}
+              setScreen={setScreen}
+              setCampaignName={setCampaignName}
+              setIntent={setIntent}
+              setIdea={setIdea}
+              setSelectedPlatforms={setSelectedPlatforms}
+              setContentAngle={setContentAngle}
+              setSimpleStyleChips={setSimpleStyleChips}
+            />
+          )}
+          {screen === "Opportunity Inbox" && (
+            <OpportunityInbox
+              opportunities={opportunities}
+              setOpportunities={setOpportunities}
+              persistOpportunity={persistOpportunity}
+              profiles={profiles}
+              setProfiles={setProfiles}
+              persistProfile={persistProfile}
+              librarySources={librarySources}
+              setLibrarySources={setLibrarySources}
+              persistLibrarySource={persistLibrarySource}
+              brandVoice={brandVoice}
+              queueApprovedReply={queueApprovedReply}
+              setCampaignName={setCampaignName}
+              setIntent={setIntent}
+              setIdea={setIdea}
+              setSelectedPlatforms={setSelectedPlatforms}
+              setSelectedProfileId={setSelectedProfileId}
+              setActiveOpportunityContext={setActiveOpportunityContext}
+              setScreen={setScreen}
+              recordActivity={recordActivity}
+            />
+          )}
+          {screen === "Content Calendar" && (
+            <ContentCalendarScreen
+              queue={visiblePostQueue}
+              campaigns={visibleCampaigns}
+              profiles={visibleProfiles}
+              opportunities={opportunities}
+              librarySources={librarySources}
+              mediaAssets={mediaAssets}
+              updateQueueItem={updateQueueItem}
+              setScreen={setScreen}
+              mediaPreviewUrl={mediaPreviewUrl}
+              reviewLinks={reviewLinks}
+              createReviewLink={createManagerReviewLink}
+              disableReviewLink={disableManagerReviewLink}
+              storageMode={storageMode}
+            />
           )}
           {screen === "Connections" && (
-            <Connections
+            <ConnectionsScreen
               instagramSandboxConnection={instagramSandboxConnection}
               saveInstagramSandboxConnection={saveSocialConnection}
+              workspaceId={workspace?.id ?? ""}
+            />
+          )}
+          {screen === "Source Inbox" && (
+            <SourceInboxScreen
+              initialView={sourceInboxInitialView}
+              campaigns={visibleCampaigns}
+              setCampaigns={setCampaigns}
+              approvedPosts={approvedPosts}
+              setApprovedPosts={setApprovedPosts}
+              postQueue={postQueue}
+              setPostQueue={setPostQueue}
+              feedbackMemory={feedbackMemory}
+              captureFeedbackMemory={captureFeedbackMemory}
+              storageMode={storageMode}
+              profiles={visibleProfiles}
+              setProfiles={setProfiles}
+              persistProfile={persistProfile}
+              opportunities={opportunities}
+              setOpportunities={setOpportunities}
+              persistOpportunity={persistOpportunity}
+              librarySources={visibleLibrarySources}
+              setLibrarySources={setLibrarySources}
+              persistLibrarySource={persistLibrarySource}
+              mediaAssets={mediaAssets}
+              setMediaAssets={setMediaAssets}
+              persistMediaAsset={persistMediaAsset}
+              history={sourceInboxHistory}
+              setHistory={setSourceInboxHistory}
+              captures={sourceCaptures}
+              setCaptures={setSourceCaptures}
+              persistSourceCapture={persistSourceCapture}
+              removeSourceCapture={removeSourceCapture}
+              recordActivity={recordActivity}
+              setScreen={setScreen}
+              setCampaignName={setCampaignName}
+              setIntent={setIntent}
+              setIdea={setIdea}
+              setMediaContext={setMediaContext}
+              setMediaPreviewUrl={setMediaPreviewUrl}
+              setSelectedProfileId={setSelectedProfileId}
             />
           )}
           {screen === "Content Library" && (
-            <ContentLibrary
-              campaigns={campaigns}
-              approvedPosts={approvedPosts}
-              postQueue={postQueue}
-              profiles={profiles}
+            <ContentLibraryScreen
+              campaigns={visibleCampaigns}
+              approvedPosts={visibleApprovedPosts}
+              postQueue={visiblePostQueue}
+              opportunities={opportunities}
+              profiles={visibleProfiles}
               setScreen={setScreen}
               updateQueueItem={updateQueueItem}
               moveApprovedToQueue={moveApprovedToQueue}
@@ -3850,8 +5479,9 @@ export function SocialCommandCenter() {
             />
           )}
           {screen === "Profiles" && (
-            <Profiles
+            <ProfilesScreen
               profiles={profiles}
+              importedInspirationPatterns={inspirationPatterns}
               approvedPosts={approvedPosts}
               setProfiles={setProfiles}
               selectedProfileId={selectedProfileId}
@@ -3881,16 +5511,27 @@ export function SocialCommandCenter() {
               persistLibrarySource={persistLibrarySource}
               removeLibrarySource={removeLibrarySource}
               storageMode={storageMode}
+              inspirationPatterns={inspirationPatterns}
+              claimLibrary={claimLibrary}
+              setClaimLibrary={setClaimLibrary}
+              persistClaimLibraryItem={persistClaimLibraryItem}
+              removeClaimLibraryItem={removeClaimLibraryItem}
+              recordActivity={recordActivity}
             />
           )}
           {screen === "Media Library" && (
-            <MediaLibrary
+            <MediaLibraryScreen
               mediaAssets={mediaAssets}
               setMediaAssets={setMediaAssets}
               persistMediaAsset={persistMediaAsset}
               removeMediaAsset={removeMediaAsset}
               campaigns={campaigns}
               approvedPosts={approvedPosts}
+              postQueue={postQueue}
+              profiles={profiles}
+              isGenerating={isGenerating}
+              recordActivity={recordActivity}
+              onGenerateContentPack={generateMediaContentPack}
               onUseMediaAsset={(asset) => {
                 applyMediaAsset(asset);
                 setScreen("New Campaign");
@@ -3899,12 +5540,17 @@ export function SocialCommandCenter() {
             />
           )}
           {screen === "Brand Voice Rules" && (
-            <BrandRules
+            <BrandRulesScreen
               uploadText={uploadText}
               brandVoice={brandVoice}
               setBrandVoice={setBrandVoice}
-              persistBrandRules={persistBrandRules}
-              storageMode={storageMode}
+              saveBrandRules={saveBrandVoiceRules}
+              feedbackMemory={feedbackMemory}
+              memorySummary={feedbackMemorySummary(feedbackMemory, useFeedbackMemory)}
+              useFeedbackMemory={useFeedbackMemory}
+              setUseFeedbackMemory={toggleFeedbackMemoryUsage}
+              updateFeedbackMemoryItem={updateFeedbackMemoryItem}
+              deleteFeedbackMemoryItem={deleteFeedbackMemoryItem}
             />
           )}
           {screen === "New Campaign" && (
@@ -3949,13 +5595,14 @@ export function SocialCommandCenter() {
               generationNotice={generationNotice}
               isGenerating={isGenerating}
               handleGenerate={handleGenerate}
+              handleCreateManualDraft={handleCreateManualDraft}
               handleMockFallback={handleMockFallback}
               createDefaultConduitProfile={createDefaultConduitProfile}
               campaignComplete={activeCampaignComplete}
             />
           )}
           {screen === "Repurpose" && (
-            <RepurposeCampaign
+            <RepurposeScreen
               source={repurposeSource}
               campaigns={campaigns}
               profiles={profiles}
@@ -3987,14 +5634,17 @@ export function SocialCommandCenter() {
                 saveCampaign(createMockRepurposeCampaign());
                 setGenerationNotice("Mock repurpose fallback was used.");
               }}
+              formatPostContent={(post, campaign) => userFacingPostContent(post.content, campaign, post)}
+              isGenericIntent={looksLikeGenericIntent}
             />
           )}
           {screen === "Ready to Post" && (
-            <PostQueue
-              queue={postQueue}
-              campaigns={campaigns}
-              profiles={profiles}
+              <PostQueue
+                queue={visiblePostQueue}
+              campaigns={visibleCampaigns}
+              profiles={visibleProfiles}
               updateQueueItem={updateQueueItem}
+              deleteQueueItem={deleteQueueItem}
               setScreen={setScreen}
               mediaPreviewUrl={mediaPreviewUrl}
               queueDebugMessage={queueDebugMessage}
@@ -4002,17 +5652,44 @@ export function SocialCommandCenter() {
               activeCampaign={activeCampaign}
               activeCampaignComplete={activeCampaignComplete}
               startNewPost={startNewPost}
-              repurposeCampaign={openRepurposeCampaign}
-              instagramSandboxConfigured={Boolean(instagramSandboxConnection)}
-            />
+                repurposeCampaign={openRepurposeCampaign}
+                instagramSandboxConnection={instagramSandboxConnection}
+                recordActivity={recordActivity}
+                reviewLinks={reviewLinks}
+                reviewFeedback={reviewFeedback}
+                resolveManagerFeedback={resolveManagerFeedback}
+                createReviewLink={createManagerReviewLink}
+                disableReviewLink={disableManagerReviewLink}
+              />
           )}
           {screen === "Review Drafts" && (
             <ResultsEditor
+              campaigns={visibleCampaigns}
               campaign={activeCampaign}
+              setActiveCampaignId={setActiveCampaignId}
               campaignComplete={activeCampaignComplete}
               rawIdeaIsGeneric={Boolean(
-                activeCampaign?.idea.trim() && looksLikeGenericRawIdea(activeCampaign.idea)
+                activeCampaign?.idea.trim() && looksLikeGenericRawIdea(activeCampaign.idea, [
+                  legacyGenericIdea,
+                  rawIdeaPlaceholder
+                ])
               )}
+              opportunities={opportunities}
+              setOpportunities={setOpportunities}
+              persistOpportunity={persistOpportunity}
+              profiles={visibleProfiles}
+              postQueue={visiblePostQueue}
+              queueApprovedReply={queueApprovedReply}
+              queuePostFromReview={queuePostFromReview}
+              sendPostToManagerReview={sendPostToManagerReview}
+              updateQueueItem={updateQueueItem}
+              updateCampaignPostFromReview={updateCampaignPostFromReview}
+              reviewQueueFilterPreset={reviewQueueFilterPreset}
+              reviewFeedback={reviewFeedback}
+              resolveManagerFeedback={resolveManagerFeedback}
+              refreshManagerFeedback={refreshManagerFeedback}
+              captureFeedbackMemory={captureFeedbackMemory}
+              feedbackMemorySummary={feedbackMemorySummary(feedbackMemory, useFeedbackMemory)}
               updatePost={updatePost}
               approvePost={approvePost}
               regeneratePost={regeneratePost}
@@ -4034,2682 +5711,6 @@ export function SocialCommandCenter() {
   );
 }
 
-function LoginScreen({
-  onSubmit,
-  missingEnv
-}: {
-  onSubmit: (email: string, password: string, mode: "sign-in" | "sign-up") => Promise<void>;
-  missingEnv: string[];
-}) {
-  const [email, setEmail] = useState("");
-  const [resetEmail, setResetEmail] = useState("");
-  const [password, setPassword] = useState("");
-  const [mode, setMode] = useState<"sign-in" | "sign-up">("sign-in");
-  const [error, setError] = useState("");
-  const [resetMessage, setResetMessage] = useState("");
-  const [showForgotPassword, setShowForgotPassword] = useState(false);
-  const [isSubmitting, setIsSubmitting] = useState(false);
-  const [isResetSubmitting, setIsResetSubmitting] = useState(false);
-
-  async function submit(event: FormEvent) {
-    event.preventDefault();
-    setError("");
-    setResetMessage("");
-    setIsSubmitting(true);
-    try {
-      await onSubmit(email.trim(), password, mode);
-    } catch (submitError) {
-      setError(submitError instanceof Error ? submitError.message : "Could not sign in.");
-    } finally {
-      setIsSubmitting(false);
-    }
-  }
-
-  async function submitPasswordReset(event: FormEvent) {
-    event.preventDefault();
-    setError("");
-    setResetMessage("");
-    setIsResetSubmitting(true);
-    try {
-      await sendPasswordResetEmail((resetEmail || email).trim());
-      setResetMessage("If an account exists, a reset link has been sent.");
-    } catch (resetError) {
-      setError(resetError instanceof Error ? resetError.message : "Could not send reset email.");
-    } finally {
-      setIsResetSubmitting(false);
-    }
-  }
-
-  return (
-    <main className="flex min-h-screen items-center justify-center bg-background p-6">
-      <Card className="w-full max-w-md p-6">
-        <div className="flex items-center gap-3">
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img src="/conduit-logo.jpg" alt="Conduit logo" className="h-12 w-12 rounded-md object-cover" />
-          <div>
-            <h1 className="text-xl font-bold">Conduit Social Command Center</h1>
-            <p className="text-sm text-muted-foreground">Sign in to your workspace.</p>
-          </div>
-        </div>
-
-        {!showForgotPassword ? (
-        <form className="mt-6 grid gap-4" onSubmit={submit}>
-          <div>
-            <FieldLabel label="Email" htmlFor="auth-email" />
-            <input
-              id="auth-email"
-              type="email"
-              value={email}
-              onChange={(event) => setEmail(event.target.value)}
-              className="mt-2 h-11 w-full rounded-md border border-input bg-white px-3 outline-none focus:ring-2 focus:ring-ring"
-              placeholder="you@company.com"
-              required
-            />
-          </div>
-          <div>
-            <div className="flex items-center justify-between gap-3">
-              <FieldLabel label="Password" htmlFor="auth-password" />
-              {mode === "sign-in" && (
-                <button
-                  type="button"
-                  className="text-sm font-bold text-primary"
-                  onClick={() => {
-                    setError("");
-                    setResetMessage("");
-                    setResetEmail(email);
-                    setShowForgotPassword(true);
-                  }}
-                >
-                  Forgot password?
-                </button>
-              )}
-            </div>
-            <input
-              id="auth-password"
-              type="password"
-              value={password}
-              onChange={(event) => setPassword(event.target.value)}
-              className="mt-2 h-11 w-full rounded-md border border-input bg-white px-3 outline-none focus:ring-2 focus:ring-ring"
-              placeholder="At least 6 characters"
-              minLength={6}
-              required
-            />
-          </div>
-          {error && <p className="rounded-md bg-red-50 p-3 text-sm font-semibold text-red-700">{error}</p>}
-          {missingEnv.length > 0 && (
-            <p className="rounded-md bg-amber-50 p-3 text-sm leading-6 text-amber-900">
-              Missing Supabase env vars: {missingEnv.join(", ")}. Local development fallback only works when Supabase is not configured.
-            </p>
-          )}
-          <Button type="submit" disabled={isSubmitting}>
-            {isSubmitting ? "Working..." : mode === "sign-in" ? "Sign in" : "Create account"}
-          </Button>
-        </form>
-        ) : (
-          <form className="mt-6 grid gap-4" onSubmit={submitPasswordReset}>
-            <div>
-              <h2 className="text-lg font-bold">Reset your password</h2>
-              <p className="mt-1 text-sm leading-6 text-muted-foreground">
-                Enter your email and we will send a Supabase password reset link.
-              </p>
-            </div>
-            <div>
-              <FieldLabel label="Email" htmlFor="reset-email" />
-              <input
-                id="reset-email"
-                type="email"
-                value={resetEmail}
-                onChange={(event) => setResetEmail(event.target.value)}
-                className="mt-2 h-11 w-full rounded-md border border-input bg-white px-3 outline-none focus:ring-2 focus:ring-ring"
-                placeholder="you@company.com"
-                required
-              />
-            </div>
-            <Button type="submit" disabled={isResetSubmitting}>
-              {isResetSubmitting ? "Sending..." : "Send reset link"}
-            </Button>
-            <Button
-              type="button"
-              variant="secondary"
-              onClick={() => {
-                setError("");
-                setShowForgotPassword(false);
-              }}
-            >
-              Back to sign in
-            </Button>
-          </form>
-        )}
-
-        {resetMessage && (
-          <p className="mt-4 rounded-md border border-teal-200 bg-teal-50 p-3 text-sm font-semibold text-teal-900">
-            {resetMessage}
-          </p>
-        )}
-
-        {!showForgotPassword && (
-          <button
-            type="button"
-            className="mt-4 text-sm font-bold text-primary"
-            onClick={() => {
-              setError("");
-              setResetMessage("");
-              setMode((current) => current === "sign-in" ? "sign-up" : "sign-in");
-            }}
-          >
-            {mode === "sign-in" ? "Need an account? Create one" : "Already have an account? Sign in"}
-          </button>
-        )}
-      </Card>
-    </main>
-  );
-}
-
-function Header({
-  screen,
-  activeCampaign
-}: {
-  screen: Screen;
-  activeCampaign?: Campaign;
-}) {
-  return (
-    <div className="mb-5 flex flex-col justify-between gap-4 rounded-lg border border-slate-200/80 bg-white/80 px-5 py-4 shadow-sm backdrop-blur md:flex-row md:items-end">
-      <div>
-        <p className="text-xs font-extrabold uppercase tracking-[0.16em] text-primary">{screenTitle(screen)}</p>
-        <h2 className="mt-1 text-3xl font-extrabold tracking-tight text-foreground">
-          {screen === "Dashboard" ? "Conduit Social Command Center" : screenTitle(screen)}
-        </h2>
-        {screen === "Dashboard" && (
-          <p className="mt-2 text-sm leading-6 text-muted-foreground">
-            Create, preview, approve, and track social posts.
-          </p>
-        )}
-      </div>
-      {activeCampaign && (
-        <div className="rounded-md border border-slate-200 bg-white px-4 py-3 text-sm shadow-sm">
-          <span className="text-xs font-bold uppercase tracking-wide text-muted-foreground">Active brief</span>
-          <p className="font-semibold">{activeCampaign.name}</p>
-        </div>
-      )}
-    </div>
-  );
-}
-
-function Dashboard({
-  campaigns,
-  activeCampaignId,
-  setActiveCampaignId,
-  setScreen,
-  deleteCampaign,
-  repurposeCampaign,
-  resetLocalData,
-  approvedCount,
-  rejectedCount,
-  draftCount,
-  profileCount,
-  librarySourceCount,
-  readyQueueCount,
-  storageMode,
-  loadDemoData,
-  clearDemoData,
-  startNewPost
-}: {
-  campaigns: Campaign[];
-  activeCampaignId: string;
-  setActiveCampaignId: (id: string) => void;
-  setScreen: (screen: Screen) => void;
-  deleteCampaign: (id: string) => void;
-  repurposeCampaign: (campaign: Campaign) => void;
-  resetLocalData: () => void;
-  approvedCount: number;
-  rejectedCount: number;
-  draftCount: number;
-  profileCount: number;
-  librarySourceCount: number;
-  readyQueueCount: number;
-  storageMode: StorageMode;
-  loadDemoData: () => void;
-  clearDemoData: () => void;
-  startNewPost: () => void;
-}) {
-  return (
-    <div className="space-y-6">
-      <Card className="p-5">
-        <div className="flex flex-col justify-between gap-4 lg:flex-row lg:items-center">
-          <div>
-            <h3 className="text-xl font-extrabold tracking-tight">Quick actions</h3>
-            <p className="mt-1 text-sm text-muted-foreground">
-              Create, preview, approve, and track Conduit social posts without touching advanced setup.
-            </p>
-          </div>
-          <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-5">
-            <Button onClick={startNewPost}>Create a post</Button>
-            <Button variant="secondary" onClick={() => setScreen("Review Drafts")}>Review drafts</Button>
-            <Button variant="secondary" onClick={() => setScreen("Ready to Post")}>Ready to post</Button>
-            <Button variant="secondary" onClick={() => setScreen("Repurpose")}>Repurpose content</Button>
-            <Button variant="secondary" onClick={() => setScreen("Profiles")}>Manage profiles</Button>
-          </div>
-        </div>
-      </Card>
-
-      <div className="grid gap-4 md:grid-cols-3 xl:grid-cols-5">
-        <Metric label="Drafts across briefs" value={draftCount} />
-        <Metric label="Approved across briefs" value={approvedCount} />
-        <Metric label="Rejected across briefs" value={rejectedCount} />
-        <Metric label="Saved profiles" value={profileCount} />
-        <Metric label="Ready to post" value={readyQueueCount} />
-      </div>
-
-      <div className="grid gap-5 lg:grid-cols-[1.2fr_0.8fr]">
-        <Card className="p-5">
-          <div className="mb-4 flex items-center justify-between gap-3">
-            <div>
-              <h3 className="text-lg font-bold">Recent briefs</h3>
-              <p className="text-sm text-muted-foreground">
-                Plan Conduit posts, founder-led updates, and repurposed content from one workflow.
-              </p>
-            </div>
-            <Button onClick={() => setScreen("New Campaign")}>
-              <Plus size={16} /> New
-            </Button>
-          </div>
-          <div className="grid gap-3">
-            {campaigns.length === 0 ? (
-              <div className="rounded-md border border-dashed border-border bg-white p-5 text-sm text-muted-foreground">
-                No posts yet. Create a post to generate drafts.
-              </div>
-            ) : (
-              campaigns.map((campaign) => (
-                <div
-                  key={campaign.id}
-                  className={cn(
-                    "rounded-lg border p-4 shadow-sm transition hover:border-primary hover:bg-teal-50",
-                    activeCampaignId === campaign.id
-                      ? "border-primary bg-teal-50"
-                      : "border-slate-200 bg-white"
-                  )}
-                >
-                  <button
-                    onClick={() => setActiveCampaignId(campaign.id)}
-                    className="w-full text-left"
-                  >
-                    <div className="flex items-start justify-between gap-3">
-                      <div>
-                        <p className="font-semibold">{campaign.name}</p>
-                        <div className="mt-2 flex flex-wrap gap-2">
-                          <Pill>{campaign.campaignType ?? "Original"}</Pill>
-                          {campaign.repurposedFrom && (
-                            <Pill>From: {campaign.repurposedFrom.label}</Pill>
-                          )}
-                        </div>
-                        <p className="mt-1 line-clamp-2 text-sm text-muted-foreground">{campaign.idea}</p>
-                        {campaign.profileName && (
-                          <p className="mt-2 text-sm font-semibold text-primary">
-                            Profile: {campaign.profileName} · {campaign.profileType}
-                          </p>
-                        )}
-                      </div>
-                      <span className="whitespace-nowrap text-xs font-semibold text-muted-foreground">
-                        {campaign.createdAt}
-                      </span>
-                    </div>
-                    <div className="mt-3 flex flex-wrap gap-2">
-                      {campaign.platforms.map((platform) => (
-                        <Pill key={platform}>{platform}</Pill>
-                      ))}
-                    </div>
-                  </button>
-                  <div className="mt-3 flex justify-end gap-2">
-                    <Button
-                      size="sm"
-                      variant="secondary"
-                      onClick={() => repurposeCampaign(campaign)}
-                    >
-                      Repurpose brief
-                    </Button>
-                    <Button
-                      size="sm"
-                      variant="danger"
-                      onClick={() => deleteCampaign(campaign.id)}
-                    >
-                      Delete brief
-                    </Button>
-                  </div>
-                </div>
-              ))
-            )}
-          </div>
-        </Card>
-
-        <div className="grid gap-5">
-          <Card className="p-5">
-            <h3 className="text-lg font-bold">Recommended demo flow</h3>
-            <div className="mt-4 grid gap-2">
-              {[
-                "Load demo data",
-                "Create Post",
-                "Review Drafts",
-                "Approve one",
-                "Ready to Post",
-                "Repurpose content"
-              ].map((item, index) => (
-                <div key={item} className="flex items-center gap-3 rounded-lg border border-slate-200 bg-slate-50 p-3">
-                  <span className="flex h-7 w-7 items-center justify-center rounded-md bg-white text-sm font-bold shadow-sm">
-                    {index + 1}
-                  </span>
-                  <span className="text-sm font-medium">{item}</span>
-                </div>
-              ))}
-            </div>
-          </Card>
-
-          <Card className="p-5">
-            <div className="flex items-start gap-3">
-              <div className="flex h-10 w-10 items-center justify-center rounded-md bg-teal-50 text-primary">
-                <Sparkles size={18} />
-              </div>
-              <div>
-                <h3 className="text-lg font-bold">Demo mode</h3>
-                <p className="mt-1 text-sm leading-6 text-muted-foreground">
-                  Load labeled sample profiles, Company Knowledge items, Brand Voice Rules, a content brief, and approved examples for presentations.
-                </p>
-              </div>
-            </div>
-            <div className="mt-4 flex flex-wrap gap-2">
-              <Button onClick={loadDemoData}>
-                <Sparkles size={16} /> Load demo data
-              </Button>
-              <Button variant="secondary" onClick={clearDemoData}>
-                Clear demo data
-              </Button>
-            </div>
-            <p className="mt-3 text-xs text-muted-foreground">
-              Demo data is clearly labeled and will not duplicate if loaded more than once.
-            </p>
-          </Card>
-
-          <Card className="p-5">
-            <h3 className="text-lg font-bold">Workflow</h3>
-            <div className="mt-4 grid gap-3">
-              {[
-                "Create a profile for the person, team, or company",
-                "Add Company Knowledge inputs",
-                "Review global Brand Voice Rules",
-                "Create a post from a main idea or media",
-                "Edit, approve, or reject generated posts"
-              ].map((item, index) => (
-                <div key={item} className="flex items-center gap-3 rounded-lg border border-slate-200 bg-slate-50 p-3">
-                  <span className="flex h-7 w-7 items-center justify-center rounded-md bg-white text-sm font-bold shadow-sm">
-                    {index + 1}
-                  </span>
-                  <span className="text-sm font-medium">{item}</span>
-                </div>
-              ))}
-            </div>
-          </Card>
-
-          <Card className="p-5">
-            <h3 className="text-lg font-bold">App status</h3>
-            <div className="mt-4 grid gap-2">
-              <div className="flex items-center justify-between rounded-lg border border-slate-200 bg-slate-50 p-3 text-sm">
-                <span className="font-semibold text-muted-foreground">Data mode</span>
-                <span className="font-bold">
-                  {storageMode === "supabase" ? "Shared workspace" : "Local browser"}
-                </span>
-              </div>
-              <div className="flex items-center justify-between rounded-lg border border-slate-200 bg-slate-50 p-3 text-sm">
-                <span className="font-semibold text-muted-foreground">Company Knowledge</span>
-                <span className="font-bold">{librarySourceCount}</span>
-              </div>
-              <div className="flex items-center justify-between rounded-lg border border-slate-200 bg-slate-50 p-3 text-sm">
-                <span className="font-semibold text-muted-foreground">Ready to post</span>
-                <span className="font-bold">{readyQueueCount}</span>
-              </div>
-            </div>
-          </Card>
-
-          <Card className="p-5">
-            <h3 className="text-lg font-bold">Local testing</h3>
-            <p className="mt-2 text-sm leading-6 text-muted-foreground">
-              This only clears local test data in this browser. It does not affect files, OpenAI, or shared workspace data.
-            </p>
-            {storageMode === "supabase" && (
-              <p className="mt-2 text-sm font-semibold text-primary">
-                Shared data is connected, so this does not delete database records.
-              </p>
-            )}
-            <Button className="mt-4" variant="danger" onClick={resetLocalData}>
-              Reset local test data
-            </Button>
-          </Card>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function Analytics({
-  postQueue,
-  setScreen
-}: {
-  postQueue: PostQueueItem[];
-  setScreen: (screen: Screen) => void;
-}) {
-  const [postTypeFilter, setPostTypeFilter] = useState<"All" | "Sandbox" | "Real">("All");
-  const analytics = queueAnalytics(postQueue);
-  const allPostedItems = postQueue.filter((item) => normalizeQueueStatus(item.status) === "Posted");
-  const postedItems = allPostedItems.filter(
-    (item) =>
-      postTypeFilter === "All" ||
-      (postTypeFilter === "Sandbox" ? item.isSandbox : !item.isSandbox)
-  );
-
-  return (
-    <div className="space-y-5">
-      <Card className="p-5">
-        <div className="flex flex-col justify-between gap-3 md:flex-row md:items-start">
-          <div>
-            <h3 className="text-lg font-bold">Manual publishing analytics</h3>
-            <p className="mt-1 max-w-2xl text-sm leading-6 text-muted-foreground">
-              Track posts after they are manually published. Metrics come from posted Ready to Post items.
-            </p>
-          </div>
-          <Button variant="secondary" onClick={() => setScreen("Ready to Post")}>
-            Update metrics
-          </Button>
-        </div>
-        <div className="mt-4 flex flex-wrap gap-2">
-          {(["All", "Real", "Sandbox"] as const).map((filter) => (
-            <button
-              key={filter}
-              type="button"
-              onClick={() => setPostTypeFilter(filter)}
-              className={cn(
-                "rounded-md border px-3 py-2 text-sm font-bold",
-                postTypeFilter === filter
-                  ? "border-primary bg-primary text-primary-foreground"
-                  : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"
-              )}
-            >
-              {filter === "All" ? "All posted" : filter}
-            </button>
-          ))}
-          <Pill>Real: {allPostedItems.filter((item) => !item.isSandbox).length}</Pill>
-          <Pill>Sandbox: {allPostedItems.filter((item) => item.isSandbox).length}</Pill>
-        </div>
-      </Card>
-
-      <div className="grid gap-4 md:grid-cols-4">
-        <Metric label="Total posted" value={analytics.totalPosted} />
-        <Metric label="Total impressions" value={analytics.totalImpressions} />
-        <Metric label="Total likes" value={analytics.totalLikes} />
-        <Card className="p-5">
-          <p className="text-sm font-semibold text-muted-foreground">Best platform</p>
-          <p className="mt-2 text-2xl font-bold">{analytics.bestPlatform}</p>
-        </Card>
-      </div>
-
-      <Card className="p-5">
-        <p className="text-sm font-bold uppercase text-muted-foreground">Top posts by engagement</p>
-        <div className="mt-4 grid gap-3">
-          {analytics.topPosts.length === 0 ? (
-            <p className="rounded-md border border-dashed border-border bg-white p-5 text-sm text-muted-foreground">
-              Mark posts as posted and add metrics to see top performers.
-            </p>
-          ) : (
-            analytics.topPosts.map((item) => (
-              <div key={item.id} className="flex flex-col justify-between gap-3 rounded-md border border-border bg-white p-4 md:flex-row md:items-center">
-                <div>
-                  <p className="font-semibold">{item.campaignName}</p>
-                  <p className="mt-1 text-sm text-muted-foreground">
-                    {item.platform} · {item.profileName || "No profile"} · {metricNumber(item.metrics?.impressions)} impressions
-                  </p>
-                </div>
-                <div className="flex flex-wrap gap-2">
-                  <Pill>{engagementTotal(item)} engagement</Pill>
-                  <Pill>{metricNumber(item.metrics?.likes)} likes</Pill>
-                </div>
-              </div>
-            ))
-          )}
-        </div>
-      </Card>
-
-      <Card className="p-5">
-        <p className="text-sm font-bold uppercase text-muted-foreground">Posted items with manual metrics</p>
-        <div className="mt-4 grid gap-3">
-          {postedItems.length === 0 ? (
-            <p className="rounded-md border border-dashed border-border bg-white p-5 text-sm text-muted-foreground">
-              No posted items yet. Mark a queued post as Posted, then add metrics.
-            </p>
-          ) : (
-            postedItems.map((item) => (
-              <div key={item.id} className="rounded-md border border-border bg-white p-4">
-                <div className="flex flex-col justify-between gap-2 md:flex-row md:items-start">
-                  <div>
-                    <p className="font-semibold">{item.campaignName}</p>
-                    <p className="mt-1 text-sm text-muted-foreground">
-                      {item.platform} · {item.profileName || "No profile"}
-                    </p>
-                  </div>
-                  <div className="flex flex-wrap gap-2">
-                    <Pill>{item.isSandbox ? "Sandbox/test post" : "Real post"}</Pill>
-                    <Pill>{metricNumber(item.metrics?.impressions)} impressions</Pill>
-                    <Pill>{metricNumber(item.metrics?.likes)} likes</Pill>
-                    <Pill>{metricNumber(item.metrics?.comments)} comments</Pill>
-                    <Pill>{metricNumber(item.metrics?.shares)} shares</Pill>
-                    <Pill>{metricNumber(item.metrics?.saves)} saves</Pill>
-                    <Pill>{metricNumber(item.metrics?.clicks)} clicks</Pill>
-                  </div>
-                </div>
-                {item.livePostUrl && (
-                  <p className="mt-3 truncate text-sm text-primary">{item.livePostUrl}</p>
-                )}
-              </div>
-            ))
-          )}
-        </div>
-      </Card>
-    </div>
-  );
-}
-
-const connectionCards = [
-  {
-    name: "LinkedIn",
-    status: "Coming soon",
-    today: "Draft, preview, approve, copy, publish manually, then paste the live URL.",
-    later: "Schedule/publish approved posts and pull post metrics once LinkedIn API access is approved.",
-    notes: "LinkedIn publishing and post syncing require approved LinkedIn API access."
-  },
-  {
-    name: "X / Twitter",
-    status: "Coming soon",
-    today: "Create short posts and threads, copy manually, and track metrics by hand.",
-    later: "Connect an X app for posting, metrics sync, and account learning.",
-    notes: "Needs X API credentials, permissions, and rate-limit review."
-  },
-  {
-    name: "Instagram",
-    status: "Sandbox setup available",
-    today: "Generate captions, overlay ideas, and media-aware previews for manual posting.",
-    later: "Configure a low-risk sandbox and dry-run the Meta/Instagram Graph API payload before real publishing.",
-    notes: "Use the test Instagram account manually first. Do not connect real accounts until auth, permissions, and posting workflow are confirmed."
-  },
-  {
-    name: "TikTok",
-    status: "Planned",
-    today: "Generate hooks, scripts, shot lists, captions, and manual posting copy.",
-    later: "Explore TikTok posting and analytics APIs after the manual workflow is proven.",
-    notes: "Video/audio analysis and account publishing are not connected yet."
-  },
-  {
-    name: "Website / Blog",
-    status: "Website fetching active",
-    today: "Fetch public webpages into Company Knowledge and use them as source material.",
-    later: "Add recurring refreshes and deeper website/blog indexing.",
-    notes: "Public website fetching is active. Social URLs still require platform APIs."
-  },
-  {
-    name: "Analytics Sync",
-    status: "Manual metrics active",
-    today: "Paste live URLs and manually enter impressions, likes, comments, shares, saves, and clicks.",
-    later: "Pull metrics automatically from connected accounts.",
-    notes: "Manual metrics power the Analytics page today."
-  },
-  {
-    name: "Mentions / Replies",
-    status: "Planned",
-    today: "No inbox, mention monitoring, or reply drafting yet.",
-    later: "Monitor comments, mentions, and replies and suggest response drafts.",
-    notes: "Requires account connections, approval controls, and response safety checks."
-  },
-  {
-    name: "Trend Listening",
-    status: "Planned",
-    today: "No automated trend monitoring yet.",
-    later: "Track relevant industry conversations and suggest post angles.",
-    notes: "Should come after permissions, account scopes, and data policy are finalized."
-  }
-];
-
-function connectionStatusClass(status: string) {
-  const normalized = status.toLowerCase();
-  if (normalized.includes("active") || normalized.includes("manual metrics")) return "bg-teal-100 text-primary";
-  if (normalized.includes("sandbox")) return "bg-blue-100 text-blue-800";
-  if (normalized.includes("soon")) return "bg-amber-100 text-amber-800";
-  return "bg-slate-100 text-slate-600";
-}
-
-function Connections({
-  instagramSandboxConnection,
-  saveInstagramSandboxConnection
-}: {
-  instagramSandboxConnection?: SocialConnection;
-  saveInstagramSandboxConnection: (connection: SocialConnection) => void;
-}) {
-  const [showInstagramSetup, setShowInstagramSetup] = useState(Boolean(instagramSandboxConnection));
-  const currentWorkflow = [
-    "Generate post",
-    "Approve to Ready to Post",
-    "Copy post manually",
-    "Publish manually",
-    "Paste live URL",
-    "Enter metrics manually",
-    "Review analytics"
-  ];
-  const futureWorkflow = [
-    "Connect account",
-    "Schedule/publish from dashboard",
-    "Pull metrics automatically",
-    "Monitor mentions/replies",
-    "Suggest responses",
-    "Learn from performance"
-  ];
-  const securityChecklist = [
-    "Auth enabled",
-    "Workspace permissions enabled",
-    "Sensitive data policy reviewed",
-    "Approval workflow confirmed",
-    "Manual posting tested",
-    "Account permissions reviewed"
-  ];
-
-  return (
-    <div className="space-y-5">
-      <Card className="p-6">
-        <div className="flex flex-col justify-between gap-4 lg:flex-row lg:items-start">
-          <div>
-            <p className="text-xs font-extrabold uppercase tracking-[0.16em] text-primary">Connections roadmap</p>
-            <h3 className="mt-2 text-2xl font-extrabold tracking-tight">Manual today, connected later</h3>
-            <p className="mt-2 max-w-3xl text-sm leading-6 text-muted-foreground">
-              Today, posts are copied and published manually. Metrics can be entered manually. Account connections will come later once the workflow is stable.
-            </p>
-          </div>
-          <Pill>No accounts connected yet</Pill>
-        </div>
-      </Card>
-
-      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-        {connectionCards.map((card) => (
-          <Card key={card.name} className="p-5">
-            <div className="flex items-start justify-between gap-3">
-              <div>
-                <h3 className="font-extrabold tracking-tight">{card.name}</h3>
-                <span className={cn("mt-2 inline-flex rounded-md px-2.5 py-1 text-xs font-bold", connectionStatusClass(card.status))}>
-                  {card.status}
-                </span>
-              </div>
-            </div>
-            <div className="mt-4 space-y-3 text-sm leading-6">
-              <div>
-                <p className="text-xs font-extrabold uppercase tracking-wide text-muted-foreground">Works today</p>
-                <p className="mt-1 text-muted-foreground">{card.today}</p>
-              </div>
-              <div>
-                <p className="text-xs font-extrabold uppercase tracking-wide text-muted-foreground">Later</p>
-                <p className="mt-1 text-muted-foreground">{card.later}</p>
-              </div>
-              <div className="rounded-md bg-slate-50 p-3 text-muted-foreground">
-                {card.notes}
-              </div>
-              {card.name === "Instagram" && (
-                <div className="space-y-2">
-                  <Button size="sm" onClick={() => setShowInstagramSetup((current) => !current)}>
-                    {showInstagramSetup ? "Hide sandbox setup" : "Open sandbox setup"}
-                  </Button>
-                  {instagramSandboxConnection && (
-                    <p className="text-xs font-semibold text-primary">
-                      Sandbox config saved · {instagramSandboxConnection.status}
-                    </p>
-                  )}
-                </div>
-              )}
-            </div>
-          </Card>
-        ))}
-      </div>
-
-      {showInstagramSetup && (
-        <InstagramSandboxSetupPanel
-          connection={instagramSandboxConnection}
-          onSave={saveInstagramSandboxConnection}
-        />
-      )}
-
-      <div className="grid gap-5 lg:grid-cols-2">
-        <WorkflowCard title="Current workflow" items={currentWorkflow} />
-        <WorkflowCard title="Future connected workflow" items={futureWorkflow} />
-      </div>
-
-      <Card className="p-5">
-        <h3 className="text-lg font-bold">Security checklist before connecting accounts</h3>
-        <p className="mt-1 text-sm leading-6 text-muted-foreground">
-          Account connections should wait until these basics are confirmed.
-        </p>
-        <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-          {securityChecklist.map((item) => (
-            <div key={item} className="flex gap-3 rounded-lg border border-slate-200 bg-white p-3 text-sm shadow-sm">
-              <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-teal-100 text-xs font-extrabold text-primary">
-                ✓
-              </span>
-              <span className="font-semibold">{item}</span>
-            </div>
-          ))}
-        </div>
-      </Card>
-    </div>
-  );
-}
-
-function InstagramSandboxSetupPanel({
-  connection,
-  onSave
-}: {
-  connection?: SocialConnection;
-  onSave: (connection: SocialConnection) => void;
-}) {
-  const metadata = connection?.metadata ?? {};
-  const [form, setForm] = useState({
-    metaAppId: metadata.metaAppId ?? "",
-    instagramBusinessAccountId: connection?.accountId ?? "",
-    facebookPageId: connection?.pageId ?? "",
-    accessTokenInput: "",
-    accessTokenAvailable:
-      metadata.accessTokenAvailable ||
-      connection?.accessTokenStatus === "Available but not stored" ||
-      connection?.accessTokenStatus === "Use server env var",
-    tokenExpirationDate: metadata.tokenExpirationDate ?? "",
-    notes: metadata.notes ?? "",
-    businessAccountReady: Boolean(metadata.businessAccountReady),
-    facebookPageConnected: Boolean(metadata.facebookPageConnected),
-    metaAppExists: Boolean(metadata.metaAppExists),
-    redirectUrlConfigured: Boolean(metadata.redirectUrlConfigured),
-    permissionsConfigured: Boolean(metadata.permissionsConfigured),
-    testPublishingEnabled: Boolean(metadata.testPublishingEnabled)
-  });
-  const [statusMessage, setStatusMessage] = useState("");
-  const [dryRunMessage, setDryRunMessage] = useState("");
-
-  const checklist = [
-    ["businessAccountReady", "Instagram account is Business/Professional"],
-    ["facebookPageConnected", "Instagram account is connected to a Facebook Page"],
-    ["metaAppExists", "Meta Developer App exists"],
-    ["redirectUrlConfigured", "Redirect URL configured"],
-    ["permissionsConfigured", "Required permissions configured"],
-    ["accessTokenAvailable", "Access token available"],
-    ["testPublishingEnabled", form.testPublishingEnabled ? "Test publishing enabled" : "Test publishing not enabled yet"]
-  ] as const;
-
-  function updateField(field: keyof typeof form, value: string | boolean) {
-    setForm((current) => ({ ...current, [field]: value }));
-  }
-
-  function handleSave(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    const now = new Date().toISOString();
-    const hasTokenSignal = form.accessTokenAvailable || form.accessTokenInput.trim().length > 0;
-    const nextConnection: SocialConnection = {
-      id: connection?.id ?? "instagram-sandbox",
-      provider: "instagram",
-      accountLabel: "Instagram Sandbox",
-      accountId: form.instagramBusinessAccountId.trim(),
-      pageId: form.facebookPageId.trim(),
-      accessTokenStatus: hasTokenSignal ? "Available but not stored" : "Not provided",
-      status: form.testPublishingEnabled ? "Test publishing enabled" : "Test publishing not enabled",
-      isSandbox: true,
-      metadata: {
-        metaAppId: form.metaAppId.trim(),
-        tokenExpirationDate: form.tokenExpirationDate,
-        notes: form.notes.trim(),
-        businessAccountReady: form.businessAccountReady,
-        facebookPageConnected: form.facebookPageConnected,
-        metaAppExists: form.metaAppExists,
-        redirectUrlConfigured: form.redirectUrlConfigured,
-        permissionsConfigured: form.permissionsConfigured,
-        accessTokenAvailable: hasTokenSignal,
-        testPublishingEnabled: form.testPublishingEnabled
-      },
-      createdAt: connection?.createdAt ?? now,
-      updatedAt: now
-    };
-
-    onSave(nextConnection);
-    setForm((current) => ({ ...current, accessTokenInput: "", accessTokenAvailable: hasTokenSignal }));
-    setStatusMessage("Instagram sandbox settings saved. Real publishing remains disabled.");
-    window.setTimeout(() => setStatusMessage(""), 2400);
-  }
-
-  async function runDryRun() {
-    setDryRunMessage("Running dry-run...");
-    try {
-      const response = await fetch("/api/integrations/instagram/test-publish-dry-run", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          accountId: form.instagramBusinessAccountId,
-          pageId: form.facebookPageId,
-          metaAppId: form.metaAppId,
-          hasAccessToken: form.accessTokenAvailable || form.accessTokenInput.trim().length > 0,
-          postCopy: "Sandbox dry-run caption. No real post should be published.",
-          mediaUrl: ""
-        })
-      });
-      const payload = await response.json();
-      setDryRunMessage(payload?.message ?? "Dry-run completed. No post was published.");
-    } catch {
-      setDryRunMessage("Dry-run route is unavailable. Manual publishing remains active.");
-    }
-  }
-
-  return (
-    <Card className="border-blue-200 bg-blue-50/50 p-6">
-      <div className="flex flex-col justify-between gap-4 lg:flex-row lg:items-start">
-        <div>
-          <p className="text-xs font-extrabold uppercase tracking-[0.16em] text-blue-800">Instagram Sandbox Setup</p>
-          <h3 className="mt-2 text-2xl font-extrabold tracking-tight">Configure a test account without enabling publishing</h3>
-          <p className="mt-2 max-w-3xl text-sm leading-6 text-muted-foreground">
-            Sandbox only. Do not connect real Conduit accounts yet. Manual publishing remains the production workflow for now.
-          </p>
-        </div>
-        <div className="flex flex-wrap gap-2">
-          <Pill>Sandbox only</Pill>
-          <Pill>Dry-run only</Pill>
-          <Pill>No OAuth yet</Pill>
-        </div>
-      </div>
-
-      <div className="mt-5 grid gap-5 lg:grid-cols-[0.8fr_1.2fr]">
-        <div className="rounded-xl border border-blue-100 bg-white p-4 shadow-sm">
-          <h4 className="font-bold">Readiness checklist</h4>
-          <div className="mt-3 grid gap-2">
-            {checklist.map(([field, label]) => (
-              <label key={field} className="flex items-center gap-3 rounded-lg bg-slate-50 p-3 text-sm font-semibold">
-                <input
-                  type="checkbox"
-                  checked={Boolean(form[field])}
-                  onChange={(event) => updateField(field, event.target.checked)}
-                />
-                <span>{label}</span>
-              </label>
-            ))}
-          </div>
-          <p className="mt-4 rounded-md border border-amber-200 bg-amber-50 p-3 text-sm font-semibold text-amber-800">
-            Token storage should be secured before using real accounts. This MVP stores token status only, not the token value.
-          </p>
-        </div>
-
-        <form onSubmit={handleSave} className="rounded-xl border border-blue-100 bg-white p-4 shadow-sm">
-          <div className="grid gap-4 md:grid-cols-2">
-            <div>
-              <FieldLabel label="Meta App ID" htmlFor="instagram-meta-app-id" />
-              <input
-                id="instagram-meta-app-id"
-                value={form.metaAppId}
-                onChange={(event) => updateField("metaAppId", event.target.value)}
-                className="mt-2 h-10 w-full rounded-md border border-input bg-white px-3 text-sm outline-none focus:ring-2 focus:ring-ring"
-                placeholder="1234567890"
-              />
-            </div>
-            <div>
-              <FieldLabel label="Instagram Business Account ID" htmlFor="instagram-business-account-id" />
-              <input
-                id="instagram-business-account-id"
-                value={form.instagramBusinessAccountId}
-                onChange={(event) => updateField("instagramBusinessAccountId", event.target.value)}
-                className="mt-2 h-10 w-full rounded-md border border-input bg-white px-3 text-sm outline-none focus:ring-2 focus:ring-ring"
-                placeholder="1784..."
-              />
-            </div>
-            <div>
-              <FieldLabel label="Facebook Page ID" htmlFor="instagram-facebook-page-id" />
-              <input
-                id="instagram-facebook-page-id"
-                value={form.facebookPageId}
-                onChange={(event) => updateField("facebookPageId", event.target.value)}
-                className="mt-2 h-10 w-full rounded-md border border-input bg-white px-3 text-sm outline-none focus:ring-2 focus:ring-ring"
-                placeholder="Page ID"
-              />
-            </div>
-            <div>
-              <FieldLabel label="Token expiration date" htmlFor="instagram-token-expiration" />
-              <input
-                id="instagram-token-expiration"
-                type="date"
-                value={form.tokenExpirationDate}
-                onChange={(event) => updateField("tokenExpirationDate", event.target.value)}
-                className="mt-2 h-10 w-full rounded-md border border-input bg-white px-3 text-sm outline-none focus:ring-2 focus:ring-ring"
-              />
-            </div>
-            <div className="md:col-span-2">
-              <FieldLabel label="Access Token" htmlFor="instagram-access-token" />
-              <input
-                id="instagram-access-token"
-                value={form.accessTokenInput}
-                onChange={(event) => updateField("accessTokenInput", event.target.value)}
-                className="mt-2 h-10 w-full rounded-md border border-input bg-white px-3 text-sm outline-none focus:ring-2 focus:ring-ring"
-                placeholder="Do not paste real production tokens here. Token status only is saved."
-              />
-              <p className="mt-2 text-xs font-semibold text-muted-foreground">
-                Prefer server-side env vars for sandbox tokens. This form clears token text after saving.
-              </p>
-            </div>
-            <div className="md:col-span-2">
-              <FieldLabel label="Notes" htmlFor="instagram-sandbox-notes" />
-              <textarea
-                id="instagram-sandbox-notes"
-                value={form.notes}
-                onChange={(event) => updateField("notes", event.target.value)}
-                className="mt-2 min-h-[90px] w-full rounded-md border border-input bg-white px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-ring"
-                placeholder="Sandbox account name, Meta app notes, permission notes..."
-              />
-            </div>
-          </div>
-          <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
-            <div className="text-sm font-semibold text-primary">
-              {statusMessage || dryRunMessage}
-            </div>
-            <div className="flex flex-wrap gap-2">
-              <Button type="button" variant="secondary" onClick={runDryRun}>
-                Test dry-run
-              </Button>
-              <Button type="submit">Save sandbox config</Button>
-            </div>
-          </div>
-        </form>
-      </div>
-    </Card>
-  );
-}
-
-function WorkflowCard({ title, items }: { title: string; items: string[] }) {
-  return (
-    <Card className="p-5">
-      <h3 className="text-lg font-bold">{title}</h3>
-      <div className="mt-4 grid gap-3">
-        {items.map((item, index) => (
-          <div key={item} className="flex items-center gap-3 rounded-lg border border-slate-200 bg-white p-3 shadow-sm">
-            <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-slate-100 text-xs font-extrabold text-slate-600">
-              {index + 1}
-            </span>
-            <span className="text-sm font-semibold">{item}</span>
-          </div>
-        ))}
-      </div>
-    </Card>
-  );
-}
-
-type ContentLibraryItem = {
-  id: string;
-  source: "generated" | "approved" | "queue";
-  postCopy: string;
-  platform: Platform;
-  postingAccount: string;
-  profileId?: string;
-  campaignId: string;
-  campaignName: string;
-  contentAngle?: ContentAngle;
-  intent?: string;
-  status: PostStatus | QueueStatus;
-  mediaUsed: boolean;
-  mediaAssetName?: string;
-  mediaPublicUrl?: string;
-  livePostUrl?: string;
-  postedAt?: string;
-  publishNotes?: string;
-  isSandbox?: boolean;
-  safetyStatus?: BrandSafetyCheck["status"];
-  readinessScore?: number;
-  metrics?: PostQueueItem["metrics"];
-  createdAt: string;
-  campaignType: "Original" | "Repurposed";
-  campaign?: Campaign;
-  post?: GeneratedPost;
-  queueItem?: PostQueueItem;
-  approvedMemory?: ApprovedPostMemory;
-};
-
-function ContentLibrary({
-  campaigns,
-  approvedPosts,
-  postQueue,
-  profiles,
-  setScreen,
-  updateQueueItem,
-  moveApprovedToQueue,
-  repurposePost,
-  mediaPreviewUrl
-}: {
-  campaigns: Campaign[];
-  approvedPosts: ApprovedPostMemory[];
-  postQueue: PostQueueItem[];
-  profiles: Profile[];
-  setScreen: (screen: Screen) => void;
-  updateQueueItem: (id: string, updates: Partial<PostQueueItem>) => void;
-  moveApprovedToQueue: (memory: ApprovedPostMemory) => void;
-  repurposePost: (campaign: Campaign, post: GeneratedPost) => void;
-  mediaPreviewUrl: string;
-}) {
-  const [query, setQuery] = useState("");
-  const [statusFilter, setStatusFilter] = useState("All");
-  const [platformFilter, setPlatformFilter] = useState("All");
-  const [profileFilter, setProfileFilter] = useState("All");
-  const [campaignFilter, setCampaignFilter] = useState("All");
-  const [mediaFilter, setMediaFilter] = useState("All");
-  const [typeFilter, setTypeFilter] = useState("All");
-  const [postTypeFilter, setPostTypeFilter] = useState<"All" | "Sandbox" | "Real">("All");
-  const [sortMode, setSortMode] = useState("Newest first");
-  const [libraryTab, setLibraryTab] = useState("All");
-  const [previewItemId, setPreviewItemId] = useState("");
-  const [detailItemId, setDetailItemId] = useState("");
-  const [copyState, setCopyState] = useState("");
-
-  const items = useMemo(
-    () => buildContentLibraryItems(campaigns, approvedPosts, postQueue, profiles),
-    [campaigns, approvedPosts, postQueue, profiles]
-  );
-  const filteredItems = items.filter((item) => {
-    const haystack = [
-      item.postCopy,
-      item.campaignName,
-      item.intent,
-      item.platform,
-      item.postingAccount
-    ]
-      .filter(Boolean)
-      .join(" ")
-      .toLowerCase();
-    const matchesSearch = !query.trim() || haystack.includes(query.trim().toLowerCase());
-    const matchesLibraryTab =
-      libraryTab === "All" ||
-      (libraryTab === "Drafts" && contentStatusLabel(item.status) === "Draft") ||
-      (libraryTab === "Approved" && contentStatusLabel(item.status) === "Approved") ||
-      (libraryTab === "Ready" && contentStatusLabel(item.status) === "Ready") ||
-      (libraryTab === "Posted" && contentStatusLabel(item.status) === "Posted") ||
-      (libraryTab === "Archived" && contentStatusLabel(item.status) === "Archived") ||
-      (libraryTab === "Repurposed" && item.campaignType === "Repurposed") ||
-      (libraryTab === "Top Performing" &&
-        contentStatusLabel(item.status) === "Posted" &&
-        contentEngagementTotal(item) > 0);
-    return (
-      matchesSearch &&
-      matchesLibraryTab &&
-      (statusFilter === "All" || item.status === statusFilter) &&
-      (platformFilter === "All" || item.platform === platformFilter) &&
-      (profileFilter === "All" || item.profileId === profileFilter || item.postingAccount === profileFilter) &&
-      (campaignFilter === "All" || item.campaignId === campaignFilter) &&
-      (mediaFilter === "All" || (mediaFilter === "Media used" ? item.mediaUsed : !item.mediaUsed)) &&
-      (typeFilter === "All" || item.campaignType === typeFilter) &&
-      (postTypeFilter === "All" ||
-        (postTypeFilter === "Sandbox" ? item.isSandbox : !item.isSandbox))
-    );
-  }).sort((a, b) => sortContentItems(a, b, sortMode));
-  const topPerforming = items
-    .filter((item) => contentStatusLabel(item.status) === "Posted" && contentEngagementTotal(item) > 0)
-    .sort((a, b) => contentEngagementTotal(b) - contentEngagementTotal(a))
-    .slice(0, 3);
-  const profileOptions = uniqueStrings(items.map((item) => item.profileId || item.postingAccount).filter(Boolean));
-  const campaignOptions = campaigns.map((campaign) => ({ id: campaign.id, name: campaign.name }));
-  const detailItem = items.find((item) => item.id === detailItemId);
-  const libraryTabs = ["All", "Drafts", "Approved", "Ready", "Posted", "Archived", "Repurposed", "Top Performing"];
-
-  async function copyItem(item: ContentLibraryItem) {
-    try {
-      await navigator.clipboard.writeText(item.postCopy);
-      setCopyState(item.id);
-      window.setTimeout(() => setCopyState(""), 1200);
-    } catch {
-      setCopyState("");
-    }
-  }
-
-  function previewPostForItem(item: ContentLibraryItem) {
-    if (item.post && item.campaign) {
-      return { post: item.post, campaign: item.campaign };
-    }
-    const profile = profiles.find((profileItem) => profileItem.id === item.profileId);
-    const campaign: Campaign = {
-      id: item.campaignId,
-      name: item.campaignName,
-      idea: "",
-      intent: item.intent,
-      contentAngle: item.contentAngle,
-      campaignType: item.campaignType,
-      platforms: [item.platform],
-      posts: [],
-      createdAt: item.createdAt,
-      profileId: item.profileId,
-      profileName: item.postingAccount,
-      profileType: profile?.type,
-      mediaContext: item.mediaUsed
-        ? {
-            filename: item.mediaAssetName,
-            assetName: item.mediaAssetName,
-            publicUrl: item.mediaPublicUrl,
-            notes: item.publishNotes
-          }
-        : undefined
-    };
-    const post: GeneratedPost = {
-      id: item.id,
-      platform: item.platform,
-      postCopy: item.postCopy,
-      content: item.postCopy,
-      status:
-        item.status === "rejected"
-          ? "rejected"
-          : item.status === "draft"
-            ? "draft"
-            : "approved",
-      score: item.readinessScore ?? 85,
-      mediaUsed: item.mediaUsed,
-      rationale: item.queueItem?.rationale,
-      recommendedMediaUse: item.queueItem?.recommendedMediaUse,
-      altText: item.queueItem?.altText,
-      overlayText: item.queueItem?.overlayText,
-      cta: item.queueItem?.cta,
-      hashtags: item.queueItem?.hashtags,
-      firstComment: item.queueItem?.firstComment,
-      carouselIdeas: item.queueItem?.carouselIdeas,
-      shotList: item.queueItem?.shotList,
-      safetyCheck: item.queueItem?.safetyCheck,
-      profileId: item.profileId,
-      profileName: item.postingAccount,
-      profileType: profile?.type
-    };
-    return { post, campaign };
-  }
-
-  function repurposeItem(item: ContentLibraryItem) {
-    const preview = previewPostForItem(item);
-    repurposePost(preview.campaign, preview.post);
-  }
-
-  return (
-    <div className="space-y-5">
-      <Card className="p-5">
-        <div className="flex flex-col justify-between gap-3 md:flex-row md:items-start">
-          <div>
-            <h3 className="text-xl font-extrabold tracking-tight">Content Library</h3>
-            <p className="mt-1 max-w-2xl text-sm leading-6 text-muted-foreground">
-              Permanent archive for every Conduit draft, approval, ready post, posted item, and repurposed brief.
-            </p>
-          </div>
-          <Button onClick={() => setScreen("New Campaign")}>
-            <Plus size={16} /> Create post
-          </Button>
-        </div>
-      </Card>
-
-      <Card className="p-5">
-        <div className="mb-4 flex flex-wrap gap-2">
-          {libraryTabs.map((tab) => (
-            <button
-              key={tab}
-              type="button"
-              onClick={() => {
-                setLibraryTab(tab);
-                setStatusFilter("All");
-              }}
-              className={cn(
-                "rounded-md border px-3 py-2 text-sm font-bold transition",
-                libraryTab === tab
-                  ? "border-primary bg-primary text-primary-foreground shadow-sm"
-                  : "border-slate-200 bg-white text-slate-600 hover:border-teal-200 hover:bg-teal-50"
-              )}
-            >
-              {tab}
-            </button>
-          ))}
-        </div>
-        <div className="grid gap-3 lg:grid-cols-[1.5fr_repeat(8,minmax(0,1fr))]">
-          <input
-            value={query}
-            onChange={(event) => setQuery(event.target.value)}
-            className="h-10 rounded-md border border-input bg-white px-3 text-sm outline-none focus:ring-2 focus:ring-ring"
-            placeholder="Search post copy, brief, intent, platform, account..."
-          />
-          <ContentFilter value={statusFilter} onChange={setStatusFilter} options={["All", "draft", "approved", "rejected", "Ready", "Scheduled", "Posted", "Archived"]} />
-          <ContentFilter value={platformFilter} onChange={setPlatformFilter} options={["All", ...platforms]} />
-          <ContentFilter value={profileFilter} onChange={setProfileFilter} options={["All", ...profileOptions]} />
-          <ContentFilter value={campaignFilter} onChange={setCampaignFilter} options={["All", ...campaignOptions.map((item) => item.id)]} labels={{ All: "All briefs", ...Object.fromEntries(campaignOptions.map((item) => [item.id, item.name])) }} />
-          <ContentFilter value={mediaFilter} onChange={setMediaFilter} options={["All", "Media used", "No media"]} />
-          <ContentFilter value={typeFilter} onChange={setTypeFilter} options={["All", "Original", "Repurposed"]} />
-          <ContentFilter value={postTypeFilter} onChange={(value) => setPostTypeFilter(value as typeof postTypeFilter)} options={["All", "Real", "Sandbox"]} labels={{ All: "All post types", Real: "Real posts only", Sandbox: "Sandbox/test" }} />
-          <ContentFilter value={sortMode} onChange={setSortMode} options={["Newest first", "Oldest first", "Highest engagement", "Highest impressions", "Highest readiness score"]} />
-        </div>
-        <div className="mt-3 flex flex-wrap gap-2">
-          <Button size="sm" variant={statusFilter === "Posted" ? "primary" : "secondary"} onClick={() => {
-            setLibraryTab("All");
-            setStatusFilter("Posted");
-          }}>
-            Posted
-          </Button>
-          <Button size="sm" variant={postTypeFilter === "Sandbox" ? "primary" : "secondary"} onClick={() => setPostTypeFilter("Sandbox")}>
-            Sandbox/test
-          </Button>
-          <Button size="sm" variant={postTypeFilter === "Real" ? "primary" : "secondary"} onClick={() => setPostTypeFilter("Real")}>
-            Real posts only
-          </Button>
-        </div>
-        <p className="mt-3 text-sm text-muted-foreground">
-          Showing {filteredItems.length} of {items.length} content items.
-        </p>
-      </Card>
-
-      <Card className="p-5">
-        <div className="flex items-center justify-between gap-3">
-          <div>
-            <h3 className="text-lg font-bold">Top performing</h3>
-            <p className="mt-1 text-sm text-muted-foreground">Based on manual metrics from posted Ready to Post items.</p>
-          </div>
-          <Pill>{topPerforming.length} posted</Pill>
-        </div>
-        <div className="mt-4 grid gap-3 lg:grid-cols-3">
-          {topPerforming.length === 0 ? (
-          <p className="rounded-lg border border-dashed border-slate-300 bg-slate-50 p-4 text-sm text-muted-foreground lg:col-span-3">
-              Add metrics to posted items to see top performers.
-            </p>
-          ) : (
-            topPerforming.map((item) => (
-              <div key={item.id} className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
-                <div className="flex flex-wrap gap-2">
-                  <Pill>{item.platform}</Pill>
-                  <Pill>{contentEngagementTotal(item)} engagement</Pill>
-                  {item.isSandbox && <Pill>Sandbox/test</Pill>}
-                </div>
-                <p className="mt-3 line-clamp-3 text-sm leading-6">{item.postCopy}</p>
-                <p className="mt-3 text-xs font-bold uppercase tracking-wide text-muted-foreground">
-                  {metricNumber(item.metrics?.impressions)} impressions · {contentEngagementRate(item)} engagement rate
-                </p>
-              </div>
-            ))
-          )}
-        </div>
-      </Card>
-
-      {filteredItems.length === 0 ? (
-        <Card className="p-8 text-center">
-          <p className="font-semibold">Create, approve, or post content and it will appear here.</p>
-          <Button className="mt-4" onClick={() => setScreen("New Campaign")}>Create a post</Button>
-        </Card>
-      ) : (
-        <div className="grid gap-3">
-          {filteredItems.map((item) => {
-            const preview = previewPostForItem(item);
-            const isPreviewing = previewItemId === item.id;
-            return (
-              <Card
-                key={item.id}
-                className={cn(
-                  "p-4",
-                  contentStatusLabel(item.status) === "Posted" && "border-teal-200 bg-teal-50/30",
-                  contentStatusLabel(item.status) === "Draft" && "border-slate-200 bg-white"
-                )}
-              >
-                <div className="flex flex-col justify-between gap-3 lg:flex-row lg:items-start">
-                  <div className="min-w-0">
-                    <div className="flex flex-wrap gap-2">
-                      <Pill>{item.platform}</Pill>
-                      <Pill>{contentStatusLabel(item.status)}</Pill>
-                      <Pill>{item.campaignType}</Pill>
-                      {item.isSandbox && <Pill>Sandbox/test</Pill>}
-                      {item.mediaUsed && <Pill>Media used</Pill>}
-                      {typeof item.readinessScore === "number" && <Pill>Readiness {item.readinessScore}/100</Pill>}
-                      {item.safetyStatus && <Pill>Safety: {item.safetyStatus}</Pill>}
-                    </div>
-                    <p className="mt-3 line-clamp-2 text-sm leading-6">{item.postCopy}</p>
-                    <p className="mt-3 text-xs font-bold uppercase tracking-wide text-muted-foreground">
-                      {item.postingAccount} · {item.campaignName} · {item.contentAngle || "No angle"} · {formatShortDateTime(item.postedAt || item.createdAt)}
-                    </p>
-                    {contentStatusLabel(item.status) === "Posted" && (
-                      <div className="mt-3 grid gap-2 text-sm md:grid-cols-2">
-                        <BriefItem label="Live URL" value={item.livePostUrl || "No live URL saved"} />
-                        <BriefItem label="Posted" value={formatShortDateTime(item.postedAt)} />
-                      </div>
-                    )}
-                    {contentStatusLabel(item.status) === "Draft" && (
-                      <p className="mt-3 rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-sm font-semibold text-slate-600">
-                        Draft only. Review and approve it when ready.
-                      </p>
-                    )}
-                    {item.metrics && contentStatusLabel(item.status) === "Posted" && (
-                      <div className="mt-3 flex flex-wrap gap-2">
-                        <Pill>{metricNumber(item.metrics.impressions)} impressions</Pill>
-                        <Pill>{metricNumber(item.metrics.likes)} likes</Pill>
-                        <Pill>{metricNumber(item.metrics.comments)} comments</Pill>
-                        <Pill>{metricNumber(item.metrics.shares)} shares</Pill>
-                        <Pill>{metricNumber(item.metrics.saves)} saves</Pill>
-                        <Pill>{metricNumber(item.metrics.clicks)} clicks</Pill>
-                        <Pill>{contentEngagementRate(item)} engagement rate</Pill>
-                      </div>
-                    )}
-                  </div>
-                  <div className="flex shrink-0 flex-wrap gap-2">
-                    <Button size="sm" variant="secondary" onClick={() => copyItem(item)}>
-                      <Clipboard size={14} /> {copyState === item.id ? "Copied" : "Copy"}
-                    </Button>
-                    <Button size="sm" variant="secondary" onClick={() => setPreviewItemId(isPreviewing ? "" : item.id)}>
-                      {isPreviewing ? "Hide preview" : "Preview"}
-                    </Button>
-                    <Button size="sm" variant="secondary" onClick={() => setDetailItemId(item.id)}>
-                      Details
-                    </Button>
-                    <Button size="sm" variant="secondary" onClick={() => repurposeItem(item)}>
-                      <Repeat2 size={14} /> Repurpose
-                    </Button>
-                    {item.approvedMemory && !item.queueItem && (
-                      <Button size="sm" onClick={() => moveApprovedToQueue(item.approvedMemory!)}>
-                        Move to Ready
-                      </Button>
-                    )}
-                    {contentStatusLabel(item.status) === "Draft" && (
-                      <Button size="sm" variant="secondary" onClick={() => setScreen("Review Drafts")}>
-                        Review draft
-                      </Button>
-                    )}
-                    {item.queueItem && normalizeQueueStatus(item.queueItem.status) !== "Archived" && (
-                      <Button size="sm" variant="secondary" onClick={() => updateQueueItem(item.queueItem!.id, { status: "Archived" })}>
-                        Archive
-                      </Button>
-                    )}
-                  </div>
-                </div>
-                {isPreviewing && (
-                  <div className="mt-4">
-                    <PlatformPreview
-                      post={preview.post}
-                      campaign={preview.campaign}
-                      mediaPreviewUrl={mediaPreviewUrl}
-                    />
-                  </div>
-                )}
-              </Card>
-            );
-          })}
-        </div>
-      )}
-      {detailItem && (
-        <ContentDetailPanel
-          item={detailItem}
-          preview={previewPostForItem(detailItem)}
-          mediaPreviewUrl={mediaPreviewUrl}
-          onClose={() => setDetailItemId("")}
-          onCopy={() => copyItem(detailItem)}
-          onRepurpose={() => repurposeItem(detailItem)}
-        />
-      )}
-    </div>
-  );
-}
-
-function ContentFilter({
-  value,
-  onChange,
-  options,
-  labels = {}
-}: {
-  value: string;
-  onChange: (value: string) => void;
-  options: string[];
-  labels?: Record<string, string>;
-}) {
-  return (
-    <select
-      value={value}
-      onChange={(event) => onChange(event.target.value)}
-      className="h-10 min-w-0 rounded-md border border-input bg-white px-3 text-sm font-semibold outline-none focus:ring-2 focus:ring-ring"
-    >
-      {options.map((option) => (
-        <option key={option} value={option}>
-          {labels[option] ?? option}
-        </option>
-      ))}
-    </select>
-  );
-}
-
-function ContentDetailPanel({
-  item,
-  preview,
-  mediaPreviewUrl,
-  onClose,
-  onCopy,
-  onRepurpose
-}: {
-  item: ContentLibraryItem;
-  preview: { post: GeneratedPost; campaign: Campaign };
-  mediaPreviewUrl: string;
-  onClose: () => void;
-  onCopy: () => void;
-  onRepurpose: () => void;
-}) {
-  const [tab, setTab] = useState("Overview");
-  const details = supportingDetailsFromPost(preview.post);
-  const tabs = ["Overview", "Post Copy", "Media", "Metrics", "Source Brief", "Repurpose"];
-
-  return (
-    <div className="fixed inset-0 z-50 flex justify-end bg-slate-950/35 p-4">
-      <div className="flex h-full w-full max-w-4xl flex-col overflow-hidden rounded-xl border border-slate-200 bg-white shadow-2xl">
-        <div className="flex flex-col justify-between gap-3 border-b border-slate-200 p-5 sm:flex-row sm:items-start">
-          <div>
-            <p className="text-xs font-extrabold uppercase tracking-wide text-primary">Content details</p>
-            <h3 className="mt-1 text-xl font-extrabold tracking-tight">{item.campaignName}</h3>
-            <p className="mt-1 text-sm text-muted-foreground">{item.platform} · {item.postingAccount}</p>
-          </div>
-          <div className="flex flex-wrap gap-2">
-            <Button size="sm" variant="secondary" onClick={onCopy}>
-              <Clipboard size={14} /> Copy
-            </Button>
-            <Button size="sm" onClick={onRepurpose}>
-              <Repeat2 size={14} /> Repurpose
-            </Button>
-            <Button size="sm" variant="secondary" onClick={onClose}>Close</Button>
-          </div>
-        </div>
-        <div className="flex gap-2 overflow-x-auto border-b border-slate-200 p-3">
-          {tabs.map((itemTab) => (
-            <button
-              key={itemTab}
-              type="button"
-              onClick={() => setTab(itemTab)}
-              className={cn(
-                "whitespace-nowrap rounded-md px-3 py-2 text-sm font-bold",
-                tab === itemTab
-                  ? "bg-primary text-primary-foreground"
-                  : "bg-slate-50 text-slate-600 hover:bg-slate-100"
-              )}
-            >
-              {itemTab}
-            </button>
-          ))}
-        </div>
-        <div className="min-h-0 flex-1 overflow-y-auto p-5">
-          {tab === "Overview" && (
-            <div className="grid gap-3 md:grid-cols-2">
-              <BriefItem label="Platform" value={item.platform} />
-              <BriefItem label="Posting account" value={item.postingAccount} />
-              <BriefItem label="Status" value={contentStatusLabel(item.status)} />
-              <BriefItem label="Content brief" value={item.campaignName} />
-              <BriefItem label="Content angle" value={item.contentAngle || "No angle saved"} />
-              <BriefItem label="Intent" value={item.intent || "No intent saved"} />
-              <BriefItem label="Live URL" value={item.livePostUrl || "No live URL saved"} />
-              <BriefItem label="Posted" value={formatShortDateTime(item.postedAt)} />
-              <BriefItem label="Post type" value={item.isSandbox ? "Sandbox/test post" : "Real post"} />
-              <BriefItem label="Readiness" value={typeof item.readinessScore === "number" ? `${item.readinessScore}/100` : "Not scored"} />
-              <BriefItem label="Brand safety" value={item.safetyStatus || "Not checked"} />
-            </div>
-          )}
-
-          {tab === "Post Copy" && (
-            <div className="space-y-4">
-              <div className="rounded-lg border border-slate-200 bg-slate-50 p-4">
-                <p className="whitespace-pre-wrap text-sm leading-6">{item.postCopy}</p>
-              </div>
-              {details.length > 0 ? (
-                <div className="grid gap-3 md:grid-cols-2">
-                  {details.map((detail) => (
-                    <BriefItem key={detail.label} label={detail.label} value={detail.value} />
-                  ))}
-                </div>
-              ) : (
-                <p className="rounded-md border border-dashed border-slate-300 bg-slate-50 p-4 text-sm text-muted-foreground">
-                  No supporting fields saved for this post.
-                </p>
-              )}
-            </div>
-          )}
-
-          {tab === "Media" && (
-            <div className="space-y-4">
-              {item.mediaUsed ? (
-                <>
-                  <MediaPreviewFrame campaign={preview.campaign} mediaPreviewUrl={item.mediaPublicUrl || mediaPreviewUrl} className="max-h-[420px]" />
-                  <div className="grid gap-3 md:grid-cols-2">
-                    <BriefItem label="Media asset" value={item.mediaAssetName || "Media used"} />
-                    <BriefItem label="Media notes" value={preview.campaign.mediaContext?.notes || "No media notes saved"} />
-                    <BriefItem label="AI analysis" value={preview.campaign.mediaContext?.analysis?.description || "No media analysis saved"} />
-                  </div>
-                </>
-              ) : (
-                <p className="rounded-md border border-dashed border-slate-300 bg-slate-50 p-4 text-sm text-muted-foreground">
-                  No media was used for this post.
-                </p>
-              )}
-            </div>
-          )}
-
-          {tab === "Metrics" && (
-            <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-4">
-              <Metric label="Impressions" value={metricNumber(item.metrics?.impressions)} />
-              <Metric label="Likes" value={metricNumber(item.metrics?.likes)} />
-              <Metric label="Comments" value={metricNumber(item.metrics?.comments)} />
-              <Metric label="Shares" value={metricNumber(item.metrics?.shares)} />
-              <Metric label="Saves" value={metricNumber(item.metrics?.saves)} />
-              <Metric label="Clicks" value={metricNumber(item.metrics?.clicks)} />
-              <Card className="p-5">
-                <p className="text-sm font-semibold text-muted-foreground">Engagement rate</p>
-                <p className="mt-2 text-2xl font-bold">{engagementRate(item.queueItem)}</p>
-              </Card>
-              <div className="lg:col-span-4">
-                <BriefItem label="Notes" value={item.publishNotes || "No publishing notes saved"} />
-              </div>
-            </div>
-          )}
-
-          {tab === "Source Brief" && (
-            <div className="grid gap-3 md:grid-cols-2">
-              <BriefItem label="Original brief" value={item.campaignName} />
-              <BriefItem label="Brief type" value={item.campaignType} />
-              <BriefItem label="Rationale" value={preview.post.rationale || "No rationale saved"} />
-              <BriefItem label="Source" value={item.source} />
-              <BriefItem label="Intent" value={item.intent || "No intent saved"} />
-              <BriefItem label="Content angle" value={item.contentAngle || "No content angle saved"} />
-            </div>
-          )}
-
-          {tab === "Repurpose" && (
-            <div className="rounded-lg border border-teal-200 bg-teal-50 p-5">
-              <p className="font-bold text-teal-900">Repurpose this posted content</p>
-              <p className="mt-2 text-sm leading-6 text-teal-900">
-                Turn this historical post into new platform-native drafts while keeping the original record intact.
-              </p>
-              <Button className="mt-4" onClick={onRepurpose}>
-                <Repeat2 size={16} /> Repurpose this post
-              </Button>
-            </div>
-          )}
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function buildContentLibraryItems(
-  campaigns: Campaign[],
-  approvedPosts: ApprovedPostMemory[],
-  postQueue: PostQueueItem[],
-  profiles: Profile[]
-) {
-  const queueByPostId = new Map(postQueue.map((item) => [item.generatedPostId, item]));
-  const approvedByPostId = new Map(approvedPosts.map((item) => [item.generatedPostId, item]));
-  const generatedIds = new Set<string>();
-  const items: ContentLibraryItem[] = [];
-
-  campaigns.forEach((campaign) => {
-    campaign.posts.forEach((post) => {
-      generatedIds.add(post.id);
-      const queueItem = queueByPostId.get(post.id);
-      const approvedMemory = approvedByPostId.get(post.id);
-      items.push({
-        id: `generated-${post.id}`,
-        source: queueItem ? "queue" : "generated",
-        postCopy: queueItem?.postCopy || queueItem?.content || userFacingPostContent(post.content, campaign, post),
-        platform: post.platform,
-        postingAccount: campaign.profileName || post.profileName || "General profile",
-        profileId: campaign.profileId || post.profileId,
-        campaignId: campaign.id,
-        campaignName: campaign.name,
-        contentAngle: campaign.contentAngle,
-        intent: campaign.intent,
-        status: queueItem?.status ?? post.status,
-        mediaUsed: Boolean(queueItem?.mediaUsed || post.mediaUsed || campaign.mediaContext?.filename),
-        mediaAssetName: queueItem?.mediaAssetName || campaign.mediaContext?.assetName || campaign.mediaContext?.filename,
-        mediaPublicUrl: queueItem?.mediaPublicUrl || campaign.mediaContext?.publicUrl,
-        livePostUrl: queueItem?.livePostUrl,
-        postedAt: queueItem?.postedAt,
-        publishNotes: queueItem?.publishNotes,
-        isSandbox: queueItem?.isSandbox,
-        safetyStatus: queueItem?.safetyCheck?.status || post.safetyCheck?.status,
-        readinessScore: post.score,
-        metrics: queueItem?.metrics,
-        createdAt: queueItem?.createdAt || campaign.createdAt,
-        campaignType: campaign.campaignType ?? "Original",
-        campaign,
-        post,
-        queueItem,
-        approvedMemory
-      });
-    });
-  });
-
-  approvedPosts
-    .filter((post) => !generatedIds.has(post.generatedPostId))
-    .forEach((post) => {
-      const profile = profiles.find((item) => item.id === post.profileId);
-      const queueItem = queueByPostId.get(post.generatedPostId);
-      items.push({
-        id: `approved-${post.id}`,
-        source: queueItem ? "queue" : "approved",
-        postCopy: queueItem?.postCopy || queueItem?.content || userFacingPostContent(post.finalContent),
-        platform: post.platform,
-        postingAccount: profile?.name || "Approved profile",
-        profileId: post.profileId,
-        campaignId: post.campaignId,
-        campaignName: queueItem?.campaignName || "Approved content",
-        contentAngle: post.contentAngle,
-        intent: post.intent,
-        status: queueItem?.status ?? "approved",
-        mediaUsed: Boolean(queueItem?.mediaUsed || post.mediaUsed),
-        mediaAssetName: queueItem?.mediaAssetName,
-        mediaPublicUrl: queueItem?.mediaPublicUrl,
-        livePostUrl: queueItem?.livePostUrl,
-        postedAt: queueItem?.postedAt,
-        publishNotes: queueItem?.publishNotes,
-        isSandbox: queueItem?.isSandbox,
-        safetyStatus: queueItem?.safetyCheck?.status || post.supportingFields?.safetyCheck?.status,
-        readinessScore: undefined,
-        metrics: queueItem?.metrics,
-        createdAt: queueItem?.createdAt || post.createdAt,
-        campaignType: "Original",
-        queueItem,
-        approvedMemory: post
-      });
-    });
-
-  postQueue
-    .filter((item) => !generatedIds.has(item.generatedPostId) && !approvedByPostId.has(item.generatedPostId))
-    .forEach((item) => {
-      items.push({
-        id: `queue-${item.id}`,
-        source: "queue",
-        postCopy: item.postCopy || item.content,
-        platform: item.platform,
-        postingAccount: item.profileName || "No profile",
-        profileId: item.profileId,
-        campaignId: item.campaignId,
-        campaignName: item.campaignName,
-        contentAngle: item.contentAngle,
-        intent: item.intent,
-        status: item.status,
-        mediaUsed: item.mediaUsed,
-        mediaAssetName: item.mediaAssetName,
-        mediaPublicUrl: item.mediaPublicUrl,
-        livePostUrl: item.livePostUrl,
-        postedAt: item.postedAt,
-        publishNotes: item.publishNotes,
-        isSandbox: item.isSandbox,
-        safetyStatus: item.safetyCheck?.status,
-        readinessScore: undefined,
-        metrics: item.metrics,
-        createdAt: item.createdAt,
-        campaignType: "Original",
-        queueItem: item
-      });
-    });
-
-  return items.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
-}
-
-function contentStatusLabel(status: ContentLibraryItem["status"]) {
-  if (status === "draft") return "Draft";
-  if (status === "approved") return "Approved";
-  if (status === "rejected") return "Rejected";
-  return status;
-}
-
-function contentEngagementTotal(item: ContentLibraryItem) {
-  const metrics = item.metrics ?? {};
-  return (
-    metricNumber(metrics.likes) +
-    metricNumber(metrics.comments) +
-    metricNumber(metrics.shares) +
-    metricNumber(metrics.saves) +
-    metricNumber(metrics.clicks)
-  );
-}
-
-function contentImpressions(item: ContentLibraryItem) {
-  return metricNumber(item.metrics?.impressions);
-}
-
-function contentEngagementRate(item: ContentLibraryItem) {
-  const impressions = contentImpressions(item);
-  if (!impressions) return "0%";
-  return `${((contentEngagementTotal(item) / impressions) * 100).toFixed(1)}%`;
-}
-
-function sortContentItems(a: ContentLibraryItem, b: ContentLibraryItem, sortMode: string) {
-  if (sortMode === "Oldest first") {
-    return new Date(a.postedAt || a.createdAt).getTime() - new Date(b.postedAt || b.createdAt).getTime();
-  }
-
-  if (sortMode === "Highest engagement") {
-    return contentEngagementTotal(b) - contentEngagementTotal(a);
-  }
-
-  if (sortMode === "Highest impressions") {
-    return contentImpressions(b) - contentImpressions(a);
-  }
-
-  if (sortMode === "Highest readiness score") {
-    return (b.readinessScore ?? 0) - (a.readinessScore ?? 0);
-  }
-
-  return new Date(b.postedAt || b.createdAt).getTime() - new Date(a.postedAt || a.createdAt).getTime();
-}
-
-function engagementRate(item?: PostQueueItem) {
-  if (!item) return "0%";
-  const impressions = metricNumber(item.metrics?.impressions);
-  if (!impressions) return "0%";
-  return `${((engagementTotal(item) / impressions) * 100).toFixed(1)}%`;
-}
-
-function Metric({ label, value }: { label: string; value: number }) {
-  return (
-    <Card className="p-5">
-      <p className="text-xs font-extrabold uppercase tracking-wide text-slate-500">{label}</p>
-      <p className="mt-3 text-4xl font-extrabold tracking-tight text-slate-950">{value}</p>
-    </Card>
-  );
-}
-
-function metricNumber(value?: number) {
-  return Number.isFinite(value) ? Number(value) : 0;
-}
-
-function engagementTotal(item: PostQueueItem) {
-  const metrics = item.metrics ?? {};
-  return (
-    metricNumber(metrics.likes) +
-    metricNumber(metrics.comments) +
-    metricNumber(metrics.shares) +
-    metricNumber(metrics.saves) +
-    metricNumber(metrics.clicks)
-  );
-}
-
-function queueAnalytics(queue: PostQueueItem[]) {
-  const posted = queue.filter((item) => normalizeQueueStatus(item.status) === "Posted");
-  const totalImpressions = posted.reduce(
-    (sum, item) => sum + metricNumber(item.metrics?.impressions),
-    0
-  );
-  const totalLikes = posted.reduce(
-    (sum, item) => sum + metricNumber(item.metrics?.likes),
-    0
-  );
-  const platformEngagement = platforms.map((platform) => ({
-    platform,
-    engagement: posted
-      .filter((item) => item.platform === platform)
-      .reduce((sum, item) => sum + engagementTotal(item), 0)
-  }));
-  const best = platformEngagement.sort((a, b) => b.engagement - a.engagement)[0];
-
-  return {
-    totalPosted: posted.length,
-    totalImpressions,
-    totalLikes,
-    bestPlatform: best && best.engagement > 0 ? best.platform : "Not enough data",
-    topPosts: [...posted].sort((a, b) => engagementTotal(b) - engagementTotal(a)).slice(0, 3)
-  };
-}
-
-function isCampaignComplete(campaign: Campaign | undefined, queue: PostQueueItem[]) {
-  if (!campaign || campaign.posts.length === 0) return false;
-
-  const campaignPlatforms = campaign.platforms.length > 0
-    ? campaign.platforms
-    : Array.from(new Set(campaign.posts.map((post) => post.platform)));
-
-  return campaignPlatforms.every((platform) => {
-    const platformPosts = campaign.posts.filter((post) => post.platform === platform);
-    const completedQueueItem = queue.find((item) => {
-      const queueStatus = normalizeQueueStatus(item.status);
-      return (
-        item.campaignId === campaign.id &&
-        item.platform === platform &&
-        (queueStatus === "Posted" || queueStatus === "Archived")
-      );
-    });
-    return Boolean(completedQueueItem) || platformPosts.every((post) => post.status === "rejected");
-  });
-}
-
-const emptyProfileForm = {
-  id: "",
-  name: "",
-  type: "Founder" as ProfileType,
-  role: "",
-  bio: "",
-  linkedInUrl: "",
-  xUrl: "",
-  instagramUrl: "",
-  tiktokUrl: "",
-  websiteUrl: "",
-  otherUrls: "",
-  examples: "",
-  notes: "",
-  syncStatus: "Manual Only" as SyncStatus,
-  lastChecked: "Never",
-  avatarUrl: "",
-  avatarStoragePath: "",
-  whatWeLike: "",
-  patternsToLearn: "",
-  thingsNotToCopy: ""
-};
-
-function Profiles({
-  profiles,
-  approvedPosts,
-  setProfiles,
-  selectedProfileId,
-  setSelectedProfileId,
-  persistProfile,
-  removeProfile,
-  storageMode,
-  createDefaultConduitProfile,
-  loadDemoData
-}: {
-  profiles: Profile[];
-  approvedPosts: ApprovedPostMemory[];
-  setProfiles: (profiles: Profile[]) => void;
-  selectedProfileId: string;
-  setSelectedProfileId: (id: string) => void;
-  persistProfile: (profile: Profile) => void;
-  removeProfile: (id: string) => void;
-  storageMode: StorageMode;
-  createDefaultConduitProfile: () => void;
-  loadDemoData: () => void;
-}) {
-  const [form, setForm] = useState(emptyProfileForm);
-  const [savedAt, setSavedAt] = useState("");
-  const [showCreate, setShowCreate] = useState(false);
-  const [activeProfileId, setActiveProfileId] = useState("");
-  const [activeTab, setActiveTab] = useState<"Overview" | "Voice" | "Sources" | "Approved Examples" | "Settings">("Overview");
-  const [avatarPreview, setAvatarPreview] = useState("");
-  const [avatarFile, setAvatarFile] = useState<File | null>(null);
-  const isEditing = Boolean(form.id);
-  const activeProfile = profiles.find((profile) => profile.id === activeProfileId);
-
-  function updateForm<K extends keyof typeof emptyProfileForm>(
-    field: K,
-    value: (typeof emptyProfileForm)[K]
-  ) {
-    setForm((current) => ({ ...current, [field]: value }));
-  }
-
-  function resetForm() {
-    setForm(emptyProfileForm);
-    setAvatarPreview("");
-    setAvatarFile(null);
-  }
-
-  function openProfile(profile: Profile, tab: typeof activeTab = "Overview") {
-    setActiveProfileId(profile.id);
-    setActiveTab(tab);
-  }
-
-  function startEdit(profile: Profile) {
-    editProfile(profile);
-    setShowCreate(true);
-    openProfile(profile, "Settings");
-  }
-
-  async function saveProfile() {
-    const profileId = form.id || `profile-${Date.now()}`;
-    let avatarData = {
-      avatarUrl: form.avatarUrl,
-      avatarStoragePath: form.avatarStoragePath
-    };
-
-    if (avatarFile) {
-      if (storageMode === "supabase") {
-        try {
-          avatarData = (await uploadProfileAvatarToSupabase(profileId, avatarFile)) ?? avatarData;
-        } catch {
-          avatarData = { avatarUrl: avatarPreview, avatarStoragePath: "" };
-        }
-      } else {
-        avatarData = { avatarUrl: avatarPreview, avatarStoragePath: "" };
-      }
-    }
-
-    const profileBase: Omit<Profile, "personality"> = {
-      id: profileId,
-      name: form.name.trim() || "Untitled Profile",
-      type: form.type,
-      role: form.role.trim(),
-      bio: form.bio.trim(),
-      linkedInUrl: form.linkedInUrl.trim(),
-      xUrl: form.xUrl.trim(),
-      instagramUrl: form.instagramUrl.trim(),
-      tiktokUrl: form.tiktokUrl.trim(),
-      websiteUrl: form.websiteUrl.trim(),
-      otherUrls: form.otherUrls.trim(),
-      examples: form.examples.trim(),
-      notes: form.notes.trim(),
-      syncStatus: form.syncStatus,
-      lastChecked: form.lastChecked.trim() || "Never",
-      avatarUrl: avatarData.avatarUrl,
-      avatarStoragePath: avatarData.avatarStoragePath,
-      whatWeLike: form.whatWeLike.trim(),
-      patternsToLearn: form.patternsToLearn.trim(),
-      thingsNotToCopy: form.thingsNotToCopy.trim(),
-      updatedAt: new Intl.DateTimeFormat("en", {
-        month: "short",
-        day: "numeric"
-      }).format(new Date())
-    };
-    const nextProfile: Profile = {
-      ...profileBase,
-      personality: createPersonalitySummary(profileBase)
-    };
-    const nextProfiles = isEditing
-      ? profiles.map((profile) =>
-          profile.id === nextProfile.id ? nextProfile : profile
-        )
-      : [nextProfile, ...profiles];
-
-    setProfiles(nextProfiles);
-    setSelectedProfileId(nextProfile.id);
-    setActiveProfileId(nextProfile.id);
-    persistProfile(nextProfile);
-    setSavedAt(new Date().toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }));
-    resetForm();
-  }
-
-  function editProfile(profile: Profile) {
-    setForm({
-      id: profile.id,
-      name: profile.name,
-      type: profile.type,
-      role: profile.role,
-      bio: profile.bio,
-      linkedInUrl: profile.linkedInUrl,
-      xUrl: profile.xUrl,
-      instagramUrl: profile.instagramUrl,
-      tiktokUrl: profile.tiktokUrl,
-      websiteUrl: profile.websiteUrl,
-      otherUrls: profile.otherUrls,
-      examples: profile.examples,
-      notes: profile.notes,
-      syncStatus: profile.syncStatus,
-      lastChecked: profile.lastChecked,
-      avatarUrl: profile.avatarUrl ?? "",
-      avatarStoragePath: profile.avatarStoragePath ?? "",
-      whatWeLike: profile.whatWeLike ?? "",
-      patternsToLearn: profile.patternsToLearn ?? "",
-      thingsNotToCopy: profile.thingsNotToCopy ?? ""
-    });
-    setAvatarPreview(profile.avatarUrl ?? "");
-    setAvatarFile(null);
-  }
-
-  function deleteProfile(profileId: string) {
-    const nextProfiles = profiles.filter((profile) => profile.id !== profileId);
-    setProfiles(nextProfiles);
-    if (selectedProfileId === profileId) {
-      setSelectedProfileId(nextProfiles[0]?.id ?? "");
-    }
-    removeProfile(profileId);
-  }
-
-  function handleAvatarFile(file?: File) {
-    if (!file) return;
-    if (avatarPreview && avatarPreview.startsWith("blob:")) {
-      URL.revokeObjectURL(avatarPreview);
-    }
-    setAvatarFile(file);
-    setAvatarPreview(URL.createObjectURL(file));
-  }
-
-  function refreshProfile(profileId: string, pastedContent: string) {
-    const checkedAt = currentCheckedAt();
-    let refreshedProfile: Profile | undefined;
-    const nextProfiles = profiles.map((profile) => {
-      if (profile.id !== profileId) {
-        return profile;
-      }
-
-      const nextExamples = [profile.examples, pastedContent.trim()]
-        .filter(Boolean)
-        .join("\n\n");
-      const nextProfile: Profile = {
-        ...profile,
-        examples: nextExamples,
-        lastChecked: checkedAt,
-        updatedAt: checkedAt
-      };
-
-      refreshedProfile = {
-        ...nextProfile,
-        personality: createPersonalitySummary(nextProfile)
-      };
-      return refreshedProfile;
-    });
-
-    setProfiles(nextProfiles);
-    if (refreshedProfile) {
-      persistProfile(refreshedProfile);
-    }
-  }
-
-  return (
-    <div className="space-y-5">
-      <div className="flex flex-col justify-between gap-3 rounded-lg border border-border bg-white p-5 shadow-panel md:flex-row md:items-center">
-        <div>
-          <h3 className="text-lg font-bold">Profiles</h3>
-          <p className="mt-1 text-sm text-muted-foreground">
-            Create identities for founders, team members, and company accounts.
-          </p>
-        </div>
-        <Button onClick={() => { resetForm(); setShowCreate((current) => !current); }}>
-          <Plus size={16} /> {showCreate ? "Hide form" : "Add Profile"}
-        </Button>
-      </div>
-
-      {showCreate && (
-        <ProfileFormCard
-          form={form}
-          updateForm={updateForm}
-          avatarPreview={avatarPreview}
-          onAvatarFile={handleAvatarFile}
-          isEditing={isEditing}
-          savedAt={savedAt}
-          storageMode={storageMode}
-          onSave={saveProfile}
-          onCancel={() => {
-            resetForm();
-            setShowCreate(false);
-          }}
-        />
-      )}
-
-      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-        {profiles.length === 0 ? (
-          <Card className="p-8 text-center md:col-span-2 xl:col-span-3">
-            <p className="font-semibold">No profiles yet.</p>
-            <p className="mt-2 text-sm text-muted-foreground">
-              Create a Conduit profile or load demo data.
-            </p>
-            <div className="mt-4 flex flex-wrap justify-center gap-2">
-              <Button onClick={createDefaultConduitProfile}>Create Conduit profile</Button>
-              <Button variant="secondary" onClick={loadDemoData}>Load demo data</Button>
-            </div>
-          </Card>
-        ) : (
-          profiles.map((profile) => (
-            <ProfileCard
-              key={profile.id}
-              profile={profile}
-              approvedExamples={approvedPosts.filter((post) => post.profileId === profile.id)}
-              isSelected={selectedProfileId === profile.id}
-              onOpen={() => openProfile(profile)}
-              onUse={() => setSelectedProfileId(profile.id)}
-              onEdit={() => startEdit(profile)}
-              onRefresh={(content) => refreshProfile(profile.id, content)}
-            />
-          ))
-        )}
-      </div>
-
-      {activeProfile && (
-        <ProfileDetailPanel
-          profile={activeProfile}
-          approvedExamples={approvedPosts.filter((post) => post.profileId === activeProfile.id)}
-          activeTab={activeTab}
-          setActiveTab={setActiveTab}
-          isSelected={selectedProfileId === activeProfile.id}
-          onUse={() => setSelectedProfileId(activeProfile.id)}
-          onClose={() => setActiveProfileId("")}
-          onEdit={() => startEdit(activeProfile)}
-          onDelete={() => deleteProfile(activeProfile.id)}
-          onRefresh={(content) => refreshProfile(activeProfile.id, content)}
-        />
-      )}
-    </div>
-  );
-}
-
-function ProfileCard({
-  profile,
-  approvedExamples,
-  isSelected,
-  onOpen,
-  onUse,
-  onEdit,
-  onRefresh
-}: {
-  profile: Profile;
-  approvedExamples: ApprovedPostMemory[];
-  isSelected: boolean;
-  onOpen: () => void;
-  onUse: () => void;
-  onEdit: () => void;
-  onRefresh: (content: string) => void;
-}) {
-  const [showRefresh, setShowRefresh] = useState(false);
-  const [refreshText, setRefreshText] = useState("");
-  const [refreshSaved, setRefreshSaved] = useState("");
-
-  function saveRefresh() {
-    if (!refreshText.trim()) {
-      return;
-    }
-
-    onRefresh(refreshText);
-    setRefreshText("");
-    setRefreshSaved(`Saved ${currentCheckedAt()}`);
-    setShowRefresh(false);
-  }
-
-  const status = getProfileReadiness(profile);
-
-  return (
-    <Card className={cn("p-5 transition hover:border-primary hover:shadow-panel", isSelected && "border-primary bg-teal-50/60")}>
-      <button className="w-full text-left" onClick={onOpen}>
-        <div className="flex items-start gap-4">
-          <ProfileAvatar profile={profile} size="lg" />
-          <div className="min-w-0 flex-1">
-            <div className="flex flex-wrap items-center gap-2">
-              <h3 className="truncate text-lg font-bold">{profile.name}</h3>
-              {isSelected && <Pill>Selected</Pill>}
-            </div>
-            <p className="mt-1 text-sm font-semibold text-muted-foreground">
-              {profile.role || profile.type}
-            </p>
-            <div className="mt-3 flex flex-wrap gap-2">
-              <Pill>{profile.type}</Pill>
-              <Pill>{status}</Pill>
-              {approvedExamples.length > 0 && <Pill>{approvedExamples.length} approved</Pill>}
-            </div>
-          </div>
-        </div>
-        <SocialIndicators profile={profile} />
-      </button>
-
-      <div className="mt-4 flex flex-wrap gap-2">
-        <Button size="sm" variant={isSelected ? "primary" : "secondary"} onClick={onUse}>
-          Use
-        </Button>
-        <Button size="sm" variant="secondary" onClick={onEdit}>
-          Edit
-        </Button>
-        <Button size="sm" variant="secondary" onClick={() => setShowRefresh(true)}>
-          Refresh
-        </Button>
-      </div>
-
-      {refreshSaved && (
-        <p className="mt-3 text-sm font-semibold text-primary">{refreshSaved}</p>
-      )}
-
-      {showRefresh && (
-        <div className="mt-4 rounded-md border border-primary/20 bg-teal-50 p-4">
-          <div className="flex flex-col justify-between gap-3 sm:flex-row sm:items-start">
-            <div>
-              <p className="text-sm font-bold uppercase text-primary">Refresh profile</p>
-              <h4 className="mt-1 font-bold">{profile.name}</h4>
-            </div>
-            <Button size="sm" variant="secondary" onClick={() => setShowRefresh(false)}>
-              Cancel
-            </Button>
-          </div>
-          <div className="mt-3 grid gap-2 text-sm text-muted-foreground">
-            <p><span className="font-semibold text-foreground">Saved URLs:</span> {profileUrlsText(profile) || "None"}</p>
-            <p><span className="font-semibold text-foreground">Sync status:</span> {profile.syncStatus}</p>
-            <p><span className="font-semibold text-foreground">Last checked:</span> {getLastChecked(profile)}</p>
-          </div>
-          <p className="mt-3 text-sm font-semibold">
-            Manual refresh only. URLs are stored as references. Paste any new posts or content below.
-          </p>
-          {hasLinkedInOrXProfileUrl(profile) && (
-            <SubtleNote>LinkedIn/X auto-fetch is not enabled yet. Paste the latest posts manually for now.</SubtleNote>
-          )}
-          {hasWebsiteProfileUrl(profile) && (
-            <SubtleNote>Website fetching can be added later. Paste page copy manually for now.</SubtleNote>
-          )}
-          <div className="mt-3">
-            <FieldLabel label="New pasted posts/content" htmlFor={`profile-refresh-${profile.id}`} />
-            <textarea
-              id={`profile-refresh-${profile.id}`}
-              value={refreshText}
-              onChange={(event) => setRefreshText(event.target.value)}
-              className="mt-2 min-h-32 w-full rounded-md border border-input bg-white p-3 text-sm leading-6 outline-none focus:ring-2 focus:ring-ring"
-              placeholder="Paste the latest posts, captions, notes, or profile examples..."
-            />
-          </div>
-          <div className="mt-3 flex justify-end gap-2">
-            <Button size="sm" variant="secondary" onClick={() => setShowRefresh(false)}>
-              Cancel
-            </Button>
-            <Button size="sm" onClick={saveRefresh} disabled={!refreshText.trim()}>
-              Save refresh
-            </Button>
-          </div>
-        </div>
-      )}
-
-    </Card>
-  );
-}
-
-function getProfileReadiness(profile: Profile) {
-  if (getLastChecked(profile) === "Never") return "Needs refresh";
-  if (!profile.examples.trim()) return "Needs examples";
-  return "Ready";
-}
-
-function ProfileAvatar({ profile, size = "md" }: { profile: Pick<Profile, "name" | "avatarUrl">; size?: "md" | "lg" | "xl" }) {
-  const sizeClass = size === "xl" ? "h-24 w-24 text-2xl" : size === "lg" ? "h-16 w-16 text-lg" : "h-11 w-11 text-sm";
-  return (
-    <div className={cn("flex shrink-0 items-center justify-center overflow-hidden rounded-full bg-primary font-bold text-primary-foreground", sizeClass)}>
-      {profile.avatarUrl ? (
-        // eslint-disable-next-line @next/next/no-img-element
-        <img src={profile.avatarUrl} alt={profile.name} className="h-full w-full object-cover" />
-      ) : (
-        initialsFromName(profile.name)
-      )}
-    </div>
-  );
-}
-
-function SocialIndicators({ profile }: { profile: Profile }) {
-  const items = [
-    ["in", profile.linkedInUrl],
-    ["X", profile.xUrl],
-    ["IG", profile.instagramUrl],
-    ["TT", profile.tiktokUrl],
-    ["Web", profile.websiteUrl]
-  ];
-  return (
-    <div className="mt-4 flex flex-wrap gap-2">
-      {items.map(([label, value]) => (
-        <span
-          key={label}
-          className={cn(
-            "rounded-md px-2 py-1 text-xs font-bold",
-            value ? "bg-teal-100 text-primary" : "bg-muted text-muted-foreground"
-          )}
-        >
-          {label}
-        </span>
-      ))}
-    </div>
-  );
-}
-
-function ProfileFormCard({
-  form,
-  updateForm,
-  avatarPreview,
-  onAvatarFile,
-  isEditing,
-  savedAt,
-  storageMode,
-  onSave,
-  onCancel
-}: {
-  form: typeof emptyProfileForm;
-  updateForm: <K extends keyof typeof emptyProfileForm>(field: K, value: (typeof emptyProfileForm)[K]) => void;
-  avatarPreview: string;
-  onAvatarFile: (file?: File) => void;
-  isEditing: boolean;
-  savedAt: string;
-  storageMode: StorageMode;
-  onSave: () => void;
-  onCancel: () => void;
-}) {
-  const [showAdvancedProfile, setShowAdvancedProfile] = useState(false);
-
-  return (
-    <Card className="p-5">
-      <div className="flex items-start justify-between gap-3">
-        <div>
-          <h3 className="text-lg font-bold">{isEditing ? "Edit profile" : "Create profile"}</h3>
-          <p className="mt-1 text-sm text-muted-foreground">
-            Profiles can be posting accounts, internal voices, or inspiration/reference sources.
-          </p>
-        </div>
-        <Button variant="ghost" size="sm" onClick={onCancel}>Cancel</Button>
-      </div>
-      <div className="mt-5 grid gap-4 md:grid-cols-[auto_1fr_1fr]">
-        <div>
-          <FieldLabel label="Avatar/photo/logo" htmlFor="profile-avatar" />
-          <div className="mt-2 flex items-center gap-3">
-            <ProfileAvatar profile={{ name: form.name || "Profile", avatarUrl: avatarPreview || form.avatarUrl }} size="lg" />
-            <input
-              id="profile-avatar"
-              type="file"
-              accept="image/png,image/jpeg,image/jpg,image/webp"
-              onChange={(event) => onAvatarFile(event.target.files?.[0])}
-              className="max-w-48 text-sm"
-            />
-          </div>
-        </div>
-        <div>
-          <FieldLabel label="Profile name" htmlFor="profile-name" />
-          <input id="profile-name" value={form.name} onChange={(event) => updateForm("name", event.target.value)} className="mt-2 h-11 w-full rounded-md border border-input bg-white px-3 outline-none focus:ring-2 focus:ring-ring" placeholder="Daniel Pereira, Conduit..." />
-        </div>
-        <div>
-          <FieldLabel label="Role/title" htmlFor="profile-role" />
-          <input id="profile-role" value={form.role} onChange={(event) => updateForm("role", event.target.value)} className="mt-2 h-11 w-full rounded-md border border-input bg-white px-3 outline-none focus:ring-2 focus:ring-ring" placeholder="Founder, CEO, Company..." />
-        </div>
-      </div>
-      <div className="mt-4 grid gap-4 md:grid-cols-3">
-        <div>
-          <FieldLabel label="Profile type" htmlFor="profile-type" />
-          <select id="profile-type" value={form.type} onChange={(event) => updateForm("type", event.target.value as ProfileType)} className="mt-2 h-11 w-full rounded-md border border-input bg-white px-3 outline-none focus:ring-2 focus:ring-ring">
-            {profileTypes.map((type) => <option key={type} value={type}>{type}</option>)}
-          </select>
-        </div>
-        <div className="md:col-span-2">
-          <FieldLabel label="Short bio/description" htmlFor="profile-bio" />
-          <input id="profile-bio" value={form.bio} onChange={(event) => updateForm("bio", event.target.value)} className="mt-2 h-11 w-full rounded-md border border-input bg-white px-3 outline-none focus:ring-2 focus:ring-ring" placeholder="What should the system know about this identity?" />
-        </div>
-      </div>
-      <div className="mt-4">
-        <FieldLabel label="Short voice note" htmlFor="profile-notes" />
-        <input
-          id="profile-notes"
-          value={form.notes}
-          onChange={(event) => updateForm("notes", event.target.value)}
-          className="mt-2 h-11 w-full rounded-md border border-input bg-white px-3 outline-none focus:ring-2 focus:ring-ring"
-          placeholder="Plainspoken, founder-led, technical, launch-style..."
-        />
-      </div>
-      <div className="mt-4 grid gap-4 md:grid-cols-2 lg:grid-cols-5">
-        {[
-          ["LinkedIn URL", "linkedInUrl"],
-          ["X URL", "xUrl"],
-          ["Instagram URL", "instagramUrl"],
-          ["TikTok URL", "tiktokUrl"],
-          ["Website URL", "websiteUrl"]
-        ].map(([label, field]) => (
-          <div key={field}>
-            <FieldLabel label={label} htmlFor={`profile-${field}`} />
-            <input
-              id={`profile-${field}`}
-              value={form[field as keyof typeof emptyProfileForm] as string}
-              onChange={(event) => updateForm(field as keyof typeof emptyProfileForm, event.target.value)}
-              className="mt-2 h-11 w-full rounded-md border border-input bg-white px-3 outline-none focus:ring-2 focus:ring-ring"
-              placeholder="Stored only"
-            />
-          </div>
-        ))}
-      </div>
-      {form.type === "Inspiration / Reference" && (
-        <div className="mt-4 rounded-md border border-amber-200 bg-amber-50 p-4 text-sm leading-6 text-amber-900">
-          Use this for outside companies, creators, or media teams whose format, energy, or creative patterns you like. The app should learn patterns, not copy wording.
-        </div>
-      )}
-      <div className="mt-4">
-        <Button variant="secondary" onClick={() => setShowAdvancedProfile((current) => !current)}>
-          {showAdvancedProfile ? "Hide advanced details" : "Show advanced details"}
-        </Button>
-      </div>
-      {showAdvancedProfile && <>
-      <div className="mt-4 grid gap-4 md:grid-cols-2">
-        <div>
-          <FieldLabel label="Other URLs" htmlFor="profile-other-urls" />
-          <textarea
-            id="profile-other-urls"
-            value={form.otherUrls}
-            onChange={(event) => updateForm("otherUrls", event.target.value)}
-            className="mt-2 min-h-24 w-full rounded-md border border-input bg-white p-3 text-sm leading-6 outline-none focus:ring-2 focus:ring-ring"
-            placeholder="Extra profile links, docs, references..."
-          />
-        </div>
-        <div>
-          <FieldLabel label="Pasted example posts/content" htmlFor="profile-examples" />
-          <textarea
-            id="profile-examples"
-            value={form.examples}
-            onChange={(event) => updateForm("examples", event.target.value)}
-            className="mt-2 min-h-24 w-full rounded-md border border-input bg-white p-3 text-sm leading-6 outline-none focus:ring-2 focus:ring-ring"
-            placeholder="Paste posts, captions, bio notes, or examples..."
-          />
-        </div>
-      </div>
-      <div className="mt-4 grid gap-4 md:grid-cols-3">
-        <div>
-          <FieldLabel label="What we like about this profile" htmlFor="profile-what-we-like" />
-          <textarea
-            id="profile-what-we-like"
-            value={form.whatWeLike}
-            onChange={(event) => updateForm("whatWeLike", event.target.value)}
-            className="mt-2 min-h-24 w-full rounded-md border border-input bg-white p-3 text-sm leading-6 outline-none focus:ring-2 focus:ring-ring"
-            placeholder="Hooks, pacing, visuals, clarity, launch energy..."
-          />
-        </div>
-        <div>
-          <FieldLabel label="Patterns to learn" htmlFor="profile-patterns" />
-          <textarea
-            id="profile-patterns"
-            value={form.patternsToLearn}
-            onChange={(event) => updateForm("patternsToLearn", event.target.value)}
-            className="mt-2 min-h-24 w-full rounded-md border border-input bg-white p-3 text-sm leading-6 outline-none focus:ring-2 focus:ring-ring"
-            placeholder="Thread structure, caption format, creative angles..."
-          />
-        </div>
-        <div>
-          <FieldLabel label="Things not to copy" htmlFor="profile-not-copy" />
-          <textarea
-            id="profile-not-copy"
-            value={form.thingsNotToCopy}
-            onChange={(event) => updateForm("thingsNotToCopy", event.target.value)}
-            className="mt-2 min-h-24 w-full rounded-md border border-input bg-white p-3 text-sm leading-6 outline-none focus:ring-2 focus:ring-ring"
-            placeholder="Specific wording, claims, brand voice, facts..."
-          />
-        </div>
-      </div>
-      <div className="mt-4 grid gap-4 md:grid-cols-3">
-        <div>
-          <FieldLabel label="Sync status" htmlFor="profile-sync-status" />
-          <select id="profile-sync-status" value={form.syncStatus} onChange={(event) => updateForm("syncStatus", event.target.value as SyncStatus)} className="mt-2 h-11 w-full rounded-md border border-input bg-white px-3 outline-none focus:ring-2 focus:ring-ring">
-            {syncStatuses.map((status) => <option key={status} value={status}>{status}</option>)}
-          </select>
-        </div>
-        <div>
-          <FieldLabel label="Last checked" htmlFor="profile-last-checked" />
-          <input id="profile-last-checked" value={form.lastChecked} onChange={(event) => updateForm("lastChecked", event.target.value)} className="mt-2 h-11 w-full rounded-md border border-input bg-white px-3 outline-none focus:ring-2 focus:ring-ring" />
-        </div>
-        <div>
-          <FieldLabel label="Internal notes" htmlFor="profile-notes-advanced" />
-          <input id="profile-notes-advanced" value={form.notes} onChange={(event) => updateForm("notes", event.target.value)} className="mt-2 h-11 w-full rounded-md border border-input bg-white px-3 outline-none focus:ring-2 focus:ring-ring" placeholder="When to use this profile" />
-        </div>
-      </div>
-      </>}
-      <div className="mt-4 flex items-center justify-between gap-3">
-        <span className="text-sm text-muted-foreground">
-          {savedAt ? `Saved ${savedAt}` : storageMode === "supabase" ? "Avatar saves with the profile when configured." : "Avatar preview is saved locally for now."}
-        </span>
-        <Button onClick={onSave}><Check size={16} /> Save profile</Button>
-      </div>
-    </Card>
-  );
-}
-
-function ProfileDetailPanel({
-  profile,
-  approvedExamples,
-  activeTab,
-  setActiveTab,
-  isSelected,
-  onUse,
-  onClose,
-  onEdit,
-  onDelete,
-  onRefresh
-}: {
-  profile: Profile;
-  approvedExamples: ApprovedPostMemory[];
-  activeTab: "Overview" | "Voice" | "Sources" | "Approved Examples" | "Settings";
-  setActiveTab: (tab: "Overview" | "Voice" | "Sources" | "Approved Examples" | "Settings") => void;
-  isSelected: boolean;
-  onUse: () => void;
-  onClose: () => void;
-  onEdit: () => void;
-  onDelete: () => void;
-  onRefresh: (content: string) => void;
-}) {
-  const [refreshText, setRefreshText] = useState("");
-  const tabs = ["Overview", "Voice", "Sources", "Approved Examples", "Settings"] as const;
-
-  function saveRefresh() {
-    if (!refreshText.trim()) return;
-    onRefresh(refreshText);
-    setRefreshText("");
-  }
-
-  return (
-    <div className="fixed inset-0 z-50 bg-slate-950/30 p-4">
-      <div className="ml-auto flex h-full max-w-3xl flex-col overflow-hidden rounded-lg border border-border bg-white shadow-2xl">
-        <div className="flex items-start justify-between gap-4 border-b border-border p-5">
-          <div className="flex items-center gap-4">
-            <ProfileAvatar profile={profile} size="lg" />
-            <div>
-              <h3 className="text-xl font-bold">{profile.name}</h3>
-              <p className="text-sm text-muted-foreground">{profile.role || profile.type}</p>
-            </div>
-          </div>
-          <Button variant="ghost" onClick={onClose}>Close</Button>
-        </div>
-        <div className="flex flex-wrap gap-2 border-b border-border p-3">
-          {tabs.map((tab) => (
-            <button key={tab} onClick={() => setActiveTab(tab)} className={cn("rounded-md px-3 py-2 text-sm font-bold", activeTab === tab ? "bg-primary text-primary-foreground" : "bg-muted text-muted-foreground")}>
-              {tab}
-            </button>
-          ))}
-        </div>
-        <div className="flex-1 overflow-y-auto p-5">
-          {activeTab === "Overview" && (
-            <div className="grid gap-4">
-              <div className="flex items-center gap-4">
-                <ProfileAvatar profile={profile} size="xl" />
-                <div>
-                  <h4 className="text-2xl font-bold">{profile.name}</h4>
-                  <p className="text-sm font-semibold text-muted-foreground">{profile.role || "No role/title yet"}</p>
-                  <div className="mt-3 flex flex-wrap gap-2">
-                    <Pill>{profile.type}</Pill>
-                    <Pill>{getProfileReadiness(profile)}</Pill>
-                    <Pill>{profile.syncStatus}</Pill>
-                    <Pill>Last checked: {profile.lastChecked}</Pill>
-                  </div>
-                </div>
-              </div>
-              <AnalysisBlock label="Short bio" value={profile.bio || "No bio added yet."} />
-              {isInspirationProfile(profile) && (
-                <div className="rounded-md border border-amber-200 bg-amber-50 p-4 text-sm leading-6 text-amber-900">
-                  Use this for outside companies, creators, or media teams whose format, energy, or creative patterns you like. The app should learn patterns, not copy wording.
-                </div>
-              )}
-              <Button onClick={onUse} disabled={isSelected || isInspirationProfile(profile)}>
-                {isInspirationProfile(profile)
-                  ? "Use as inspiration in Create Post"
-                  : isSelected
-                    ? "Posting Account selected"
-                    : "Use as Posting Account"}
-              </Button>
-            </div>
-          )}
-          {activeTab === "Voice" && (
-            <div className="grid gap-3 md:grid-cols-2">
-              <AnalysisBlock label="Voice traits" value={profile.personality.voiceTraits} />
-              <AnalysisBlock label="Common topics" value={profile.personality.commonTopics} />
-              <AnalysisBlock label="Common hooks" value={profile.personality.commonHooks} />
-              <AnalysisBlock label="Sentence style" value={profile.personality.sentenceStyle} />
-              <AnalysisBlock label="Repeated phrases" value={profile.personality.repeatedPhrases} />
-              <AnalysisBlock label="What to avoid" value={profile.personality.avoid} />
-              <AnalysisBlock label="Best platforms" value={profile.personality.bestPlatforms} />
-              <AnalysisBlock label="Best use cases" value={profile.personality.bestUseCases} />
-              <AnalysisBlock label="What we like" value={profile.whatWeLike || "Not defined yet."} />
-              <AnalysisBlock label="Patterns to learn" value={profile.patternsToLearn || "Not defined yet."} />
-              <AnalysisBlock label="Things not to copy" value={profile.thingsNotToCopy || "Not defined yet."} />
-            </div>
-          )}
-          {activeTab === "Sources" && (
-            <div className="grid gap-4">
-              <LearningNowBox />
-              <div className="grid gap-3 md:grid-cols-2">
-                <AnalysisBlock label="LinkedIn URL" value={profile.linkedInUrl || "None"} />
-                <AnalysisBlock label="X URL" value={profile.xUrl || "None"} />
-                <AnalysisBlock label="Instagram URL" value={profile.instagramUrl || "None"} />
-                <AnalysisBlock label="TikTok URL" value={profile.tiktokUrl || "None"} />
-                <AnalysisBlock label="Website URL" value={profile.websiteUrl || "None"} />
-                <AnalysisBlock label="Other URLs" value={profile.otherUrls || "None"} />
-              </div>
-              <AnalysisBlock label="Pasted examples/content" value={profile.examples || "No pasted examples yet."} />
-              <div className="rounded-md border border-primary/20 bg-teal-50 p-4">
-                <FieldLabel label="Refresh profile with new pasted posts/content" htmlFor={`panel-refresh-${profile.id}`} />
-                <textarea id={`panel-refresh-${profile.id}`} value={refreshText} onChange={(event) => setRefreshText(event.target.value)} className="mt-2 min-h-28 w-full rounded-md border border-input bg-white p-3 text-sm leading-6 outline-none focus:ring-2 focus:ring-ring" placeholder="Paste new examples here..." />
-                <div className="mt-3 flex justify-end">
-                  <Button size="sm" onClick={saveRefresh} disabled={!refreshText.trim()}>Refresh profile</Button>
-                </div>
-              </div>
-            </div>
-          )}
-          {activeTab === "Approved Examples" && (
-            <ApprovedExamplesPanel examples={approvedExamples} />
-          )}
-          {activeTab === "Settings" && (
-            <div className="grid gap-4">
-              <p className="text-sm text-muted-foreground">Use Edit to change all profile fields, avatar, URLs, examples, and settings.</p>
-              <div className="flex flex-wrap gap-2">
-                <Button onClick={onEdit}>Edit all fields</Button>
-                <Button variant="danger" onClick={onDelete}>Delete profile</Button>
-              </div>
-            </div>
-          )}
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function ApprovedExamplesPanel({ examples }: { examples: ApprovedPostMemory[] }) {
-  const [copyState, setCopyState] = useState("");
-  if (examples.length === 0) {
-    return <p className="text-sm text-muted-foreground">No approved examples yet.</p>;
-  }
-  return (
-    <div className="grid gap-4">
-      {platforms.map((platform) => {
-        const platformExamples = examples.filter((example) => example.platform === platform);
-        if (platformExamples.length === 0) return null;
-        return (
-          <div key={platform} className="rounded-md border border-border bg-white p-4">
-            <h4 className="font-bold">{platform}</h4>
-            <div className="mt-3 grid gap-3">
-              {platformExamples.map((example) => (
-                <div key={example.id} className="rounded-md bg-muted p-3">
-                  <p className="whitespace-pre-wrap text-sm leading-6">{example.finalContent}</p>
-                  <div className="mt-2 flex justify-end">
-                    <Button size="sm" variant="secondary" onClick={async () => {
-                      await navigator.clipboard.writeText(example.finalContent);
-                      setCopyState(example.id);
-                      window.setTimeout(() => setCopyState(""), 1200);
-                    }}>
-                      <Clipboard size={14} /> {copyState === example.id ? "Copied" : "Copy"}
-                    </Button>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-        );
-      })}
-    </div>
-  );
-}
-
-const emptyLibrarySourceForm = {
-  id: "",
-  name: "",
-  category: "Website" as LibrarySourceCategory,
-  platform: "Website" as LibrarySourcePlatform,
-  urls: "",
-  urlType: "Website URL" as SourceUrlType,
-  syncStatus: "Manual Only" as SyncStatus,
-  lastChecked: "Never",
-  content: "",
-  notes: ""
-};
-
 function KnowledgeBase({
   librarySources,
   setLibrarySources,
@@ -6726,12 +5727,18 @@ function KnowledgeBase({
   setSelectedProfileId,
   persistLibrarySource,
   removeLibrarySource,
-  storageMode
+  storageMode,
+  inspirationPatterns,
+  claimLibrary,
+  setClaimLibrary,
+  persistClaimLibraryItem,
+  removeClaimLibraryItem,
+  recordActivity
 }: {
   librarySources: LibrarySource[];
-  setLibrarySources: (sources: LibrarySource[]) => void;
+  setLibrarySources: (items: LibrarySource[] | ((current: LibrarySource[]) => LibrarySource[])) => void;
   selectedLibrarySourceIds: string[];
-  setSelectedLibrarySourceIds: (ids: string[]) => void;
+  setSelectedLibrarySourceIds: (ids: string[] | ((current: string[]) => string[])) => void;
   approvedPosts: ApprovedPostMemory[];
   brandVoice: BrandVoiceProfile;
   profiles: Profile[];
@@ -6740,3013 +5747,289 @@ function KnowledgeBase({
   setContentAngle: (value: ContentAngle | "") => void;
   setIntent: (value: string) => void;
   setIdea: (value: string) => void;
-  setSelectedProfileId: (id: string) => void;
+  setSelectedProfileId: (value: string) => void;
   persistLibrarySource: (source: LibrarySource) => void;
   removeLibrarySource: (id: string) => void;
   storageMode: StorageMode;
+  inspirationPatterns: InspirationPattern[];
+  claimLibrary: ClaimLibraryItem[];
+  setClaimLibrary: (items: ClaimLibraryItem[] | ((current: ClaimLibraryItem[]) => ClaimLibraryItem[])) => void;
+  persistClaimLibraryItem: (claim: ClaimLibraryItem) => void;
+  removeClaimLibraryItem: (id: string) => void;
+  recordActivity: (input: Omit<ActivityLogItem, "id" | "createdAt" | "userEmail" | "workspaceName">) => ActivityLogItem;
 }) {
-  const [form, setForm] = useState(emptyLibrarySourceForm);
-  const [savedAt, setSavedAt] = useState("");
-  const [showAdvancedKnowledge, setShowAdvancedKnowledge] = useState(false);
-  const [formDocumentMessage, setFormDocumentMessage] = useState("");
-  const [formDocumentError, setFormDocumentError] = useState("");
-  const [isExtractingFormDocument, setIsExtractingFormDocument] = useState(false);
-  const [detailSourceId, setDetailSourceId] = useState("");
-  const [detailInitialTab, setDetailInitialTab] = useState<KnowledgeDetailTab>("Overview");
-  const isEditing = Boolean(form.id);
-  const detailSource = librarySources.find((source) => source.id === detailSourceId);
-  const activeSourceIds = selectedLibrarySourceIds.length > 0
-    ? selectedLibrarySourceIds
-    : librarySources.map((source) => source.id);
-  const activeSources = librarySources.filter((source) => activeSourceIds.includes(source.id));
-  const totalWords = librarySources.reduce((sum, source) => sum + countWords(source.content), 0);
-  const lastUpdated = latestKnowledgeUpdate(librarySources);
-  const lastUpdatedDisplay = formatShortDate(lastUpdated);
-  const sourceTypes = sourceTypesLoaded(librarySources);
-  const brainMap = buildConduitBrainMap(librarySources, approvedPosts, brandVoice);
+  const [sourceName, setSourceName] = useState("");
+  const [sourceCategory, setSourceCategory] = useState<LibrarySourceCategory>("Website");
+  const [sourcePlatform, setSourcePlatform] = useState<LibrarySourcePlatform>("Website");
+  const [sourceUrls, setSourceUrls] = useState("");
+  const [sourceContent, setSourceContent] = useState("");
+  const [sourceNotes, setSourceNotes] = useState("");
+  const [claimText, setClaimText] = useState("");
+  const [claimType, setClaimType] = useState<ClaimType>("Needs review");
 
-  function updateForm<K extends keyof typeof emptyLibrarySourceForm>(
-    field: K,
-    value: (typeof emptyLibrarySourceForm)[K]
-  ) {
-    setForm((current) => ({ ...current, [field]: value }));
+  const activeSources = librarySources.filter((source) => source.reviewStatus !== "Save only");
+  const approvedClaims = claimLibrary.filter((claim) => claim.claimType === "Approved claim" || claim.claimType === "Proof-backed");
+  const riskyClaims = claimLibrary.filter((claim) => claim.claimType === "Do not say" || claim.riskLevel === "High");
+
+  function toggleSource(id: string) {
+    setSelectedLibrarySourceIds((current) =>
+      current.includes(id) ? current.filter((item) => item !== id) : [...current, id]
+    );
   }
 
-  function resetForm() {
-    setForm(emptyLibrarySourceForm);
-    setFormDocumentMessage("");
-    setFormDocumentError("");
-  }
-
-  function saveSource() {
-    const sourceName = form.name.trim();
-    const sourceBase: Omit<LibrarySource, "analysis"> = {
-      id: form.id || `library-${Date.now()}`,
-      name: sourceName,
-      category: form.category,
-      platform: form.platform,
-      urls: form.urls.trim(),
-      urlType: form.urlType,
-      syncStatus: form.syncStatus,
-      lastChecked: form.lastChecked.trim() || "Never",
-      content: form.content.trim(),
-      notes: form.notes.trim(),
-      updatedAt: currentCheckedAt()
+  function addSource() {
+    const now = new Date().toISOString();
+    const name =
+      sourceName.trim() ||
+      getLibrarySourceDisplayName({
+        name: "",
+        category: sourceCategory,
+        platform: sourcePlatform,
+        urls: sourceUrls,
+        updatedAt: now
+      } as LibrarySource);
+    const source: LibrarySource = {
+      id: `source-${Date.now()}`,
+      name,
+      category: sourceCategory,
+      platform: sourcePlatform,
+      urls: sourceUrls.trim(),
+      content: sourceContent.trim(),
+      notes: sourceNotes.trim(),
+      analysis: {
+        voiceTraits: "Needs analysis.",
+        commonTopics: sourceCategory,
+        repeatedPhrases: "Needs analysis.",
+        strongHooks: "Needs analysis.",
+        proofPoints: "Review source before using as proof.",
+        avoid: "Avoid unsupported claims until reviewed.",
+        bestUseCases: "Company Knowledge, source material, and content planning.",
+        keyThemes: [],
+        usefulPhrases: [],
+        customerPainPoints: [],
+        productClaims: [],
+        founderVoiceExamples: [],
+        postIdeas: []
+      },
+      useFor: ["Use as Company Knowledge"],
+      reviewStatus: "Needs review",
+      tags: [],
+      updatedAt: now
     };
-    const nextSource: LibrarySource = {
-      ...sourceBase,
-      analysis: createLibrarySourceAnalysis(sourceBase)
-    };
-    const nextSources = isEditing
-      ? librarySources.map((source) => source.id === nextSource.id ? nextSource : source)
-      : [nextSource, ...librarySources];
-
-    setLibrarySources(nextSources);
-    persistLibrarySource(nextSource);
-    setSelectedLibrarySourceIds(Array.from(new Set([...activeSourceIds, nextSource.id])));
-    setSavedAt(new Date().toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }));
-    resetForm();
-  }
-
-  function editSource(source: LibrarySource) {
-    setForm({
-      id: source.id,
-      name: source.name,
-      category: source.category,
-      platform: source.platform,
-      urls: source.urls,
-      urlType: getUrlType(source),
-      syncStatus: getSyncStatus(source),
-      lastChecked: getLastChecked(source),
-      content: source.content,
-      notes: source.notes
+    setLibrarySources((current) => [source, ...current]);
+    setSelectedLibrarySourceIds((current) => uniqueStrings([source.id, ...current]));
+    persistLibrarySource(source);
+    recordActivity({
+      actionType: "Company Knowledge source added",
+      objectType: "Company Knowledge",
+      objectId: source.id,
+      title: "Knowledge source added",
+      summary: `${source.name} was saved to Company Knowledge.`,
+      destination: "Company Knowledge",
+      status: "success"
     });
+    setSourceName("");
+    setSourceUrls("");
+    setSourceContent("");
+    setSourceNotes("");
   }
 
-  function deleteSource(sourceId: string) {
-    setLibrarySources(librarySources.filter((source) => source.id !== sourceId));
-    setSelectedLibrarySourceIds(selectedLibrarySourceIds.filter((id) => id !== sourceId));
-    if (detailSourceId === sourceId) setDetailSourceId("");
-    removeLibrarySource(sourceId);
-  }
-
-  function saveSourceRecord(nextSource: LibrarySource) {
-    setLibrarySources(
-      librarySources.map((item) => item.id === nextSource.id ? nextSource : item)
-    );
-    persistLibrarySource(nextSource);
-  }
-
-  function refreshSource(sourceId: string, pastedContent: string) {
-    const checkedAt = currentCheckedAt();
-    const source = librarySources.find((item) => item.id === sourceId);
-    if (!source || !pastedContent.trim()) return;
-
-    const sourceBase: Omit<LibrarySource, "analysis"> = {
-      ...source,
-      content: [source.content, pastedContent.trim()].filter(Boolean).join("\n\n"),
-      lastChecked: checkedAt,
-      updatedAt: checkedAt
+  function addClaim() {
+    const text = claimText.trim();
+    if (!text) return;
+    const now = new Date().toISOString();
+    const claim: ClaimLibraryItem = {
+      id: `claim-${Date.now()}`,
+      claimText: text,
+      claimType,
+      sourceType: "manual entry",
+      notes: "",
+      riskLevel: claimType === "Do not say" || claimType === "Internal only" ? "High" : claimType === "Needs review" ? "Medium" : "Low",
+      reviewedAt: claimType === "Approved claim" || claimType === "Proof-backed" ? now : undefined,
+      metadata: {},
+      createdAt: now,
+      updatedAt: now
     };
-    saveSourceRecord({
-      ...sourceBase,
-      analysis: createLibrarySourceAnalysis(sourceBase)
+    setClaimLibrary((current) => [claim, ...current]);
+    persistClaimLibraryItem(claim);
+    recordActivity({
+      actionType: "Claim added",
+      objectType: "Claim",
+      objectId: claim.id,
+      title: "Claim added",
+      summary: claim.claimText,
+      destination: "Claim Library",
+      status: "success"
     });
+    setClaimText("");
   }
 
-  function toggleSourceActive(sourceId: string) {
-    setSelectedLibrarySourceIds(
-      activeSourceIds.includes(sourceId)
-        ? activeSourceIds.filter((id) => id !== sourceId)
-        : [...activeSourceIds, sourceId]
-    );
-  }
-
-  function openDetails(sourceId: string, tab: KnowledgeDetailTab = "Overview") {
-    setDetailSourceId(sourceId);
-    setDetailInitialTab(tab);
-  }
-
-  function createPostFromTheme(theme: ConduitBrainTheme) {
-    const conduitProfile = findDefaultPostingAccount(profiles);
-    if (conduitProfile) {
-      setSelectedProfileId(conduitProfile.id);
-    }
-    setCampaignName(`${theme.name} post`);
-    setContentAngle(theme.contentAngle);
-    setIntent(theme.summary);
-    setIdea(
-      [
-        `Theme: ${theme.name}`,
-        theme.summary,
-        "",
-        "Useful post angles:",
-        ...theme.angles.map((angle) => `- ${angle}`),
-        "",
-        `Related Company Knowledge: ${theme.sourceNames.join(", ") || "Use Conduit Company Knowledge automatically."}`
-      ].join("\n")
-    );
-    if (theme.sourceIds.length > 0) {
-      setSelectedLibrarySourceIds(theme.sourceIds);
-    }
+  function startPostFromSource(source: LibrarySource) {
+    setCampaignName(source.name);
+    setContentAngle("Industry POV");
+    setIntent(`Turn this Company Knowledge source into a practical Conduit social post: ${source.name}`);
+    setIdea([source.content, source.notes, source.urls].filter(Boolean).join("\n\n"));
+    setSelectedLibrarySourceIds([source.id]);
+    const conduitProfile = profiles.find((profile) => profile.name.toLowerCase().includes("conduit"));
+    if (conduitProfile) setSelectedProfileId(conduitProfile.id);
     setScreen("New Campaign");
   }
 
-  async function handleFormDocumentUpload(file?: File | null) {
-    if (!file) return;
-    setIsExtractingFormDocument(true);
-    setFormDocumentMessage("");
-    setFormDocumentError("");
-
-    try {
-      const formData = new FormData();
-      formData.append("file", file);
-      const response = await fetch("/api/extract-document", {
-        method: "POST",
-        body: formData
-      });
-      const payload = await readJsonResponse(response, "Document extraction failed");
-      if (!response.ok) {
-        throw new Error(payload?.error ?? "Could not extract text from this document.");
-      }
-      const extractedContent = [
-        `Extracted from document: ${payload.filename || file.name}`,
-        `File type: ${payload.file_type || file.type || "unknown"}`,
-        `Uploaded at: ${new Date(payload.uploaded_at ?? Date.now()).toLocaleString()}`,
-        "",
-        payload.text
-      ].join("\n");
-      updateForm("content", [form.content, extractedContent].filter(Boolean).join("\n\n"));
-      setFormDocumentMessage(`Extracted ${payload.extracted_text_length ?? String(payload.text ?? "").length} characters into pasted content.`);
-    } catch (error) {
-      setFormDocumentError(error instanceof Error ? error.message : "Could not extract that document.");
-    } finally {
-      setIsExtractingFormDocument(false);
-    }
-  }
-
   return (
-    <div className="grid gap-5">
-      <Card className="p-5">
-        <div className="flex flex-col justify-between gap-3 lg:flex-row lg:items-start">
-          <div>
-            <h3 className="text-xl font-bold">Company Knowledge</h3>
-            <p className="mt-1 text-sm leading-6 text-muted-foreground">
-              The source-of-truth brain for Conduit posts.
-            </p>
-          </div>
-          <Pill>Used automatically in Create Post</Pill>
+    <div className="space-y-5">
+      <Card className="p-6">
+        <p className="text-xs font-extrabold uppercase tracking-wide text-primary">Company Knowledge / Conduit Brain</p>
+        <h2 className="mt-1 text-2xl font-extrabold tracking-tight">Truth layer</h2>
+        <p className="mt-2 max-w-3xl text-sm leading-6 text-muted-foreground">
+          Company Knowledge stores facts, proof points, themes, claims, and guardrails. Generation can use these sources, while inspiration and profiles only guide style.
+        </p>
+        <div className="mt-5 grid gap-3 md:grid-cols-4">
+          <BriefItem label="Active sources" value={activeSources.length} />
+          <BriefItem label="Approved posts" value={approvedPosts.length} />
+          <BriefItem label="Approved claims" value={approvedClaims.length} />
+          <BriefItem label="Risky claims" value={riskyClaims.length} />
         </div>
       </Card>
 
-      <Card className="p-5">
-        <div className="flex flex-col justify-between gap-4 lg:flex-row lg:items-start">
-          <div>
-            <p className="text-sm font-bold uppercase text-primary">Conduit Brain Status</p>
-            <h3 className="mt-1 text-lg font-bold">
-              {librarySources.length > 0 ? "Ready" : "Needs sources"}
-            </h3>
-            <p className="mt-1 text-sm text-muted-foreground">
-              Used automatically in Create Post.
-            </p>
-          </div>
-          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-            <BrainStatusItem label="Sources used" value={activeSources.length} />
-            <BrainStatusItem label="Words loaded" value={totalWords} />
-            <BrainStatusItem label="Last updated" value={lastUpdatedDisplay} />
-            <BrainStatusItem label="Source types" value={sourceTypes || "None yet"} />
-          </div>
-        </div>
-      </Card>
-
-      <ConduitBrainMap
-        brainMap={brainMap}
-        sourceCount={librarySources.length}
-        totalWords={totalWords}
-        lastUpdated={lastUpdatedDisplay}
-        onCreatePostFromTheme={createPostFromTheme}
-      />
-
-      <Card className="p-5">
-        <div className="flex items-start justify-between gap-3">
-          <div>
-            <h3 className="text-lg font-bold">
-              {isEditing ? "Edit knowledge source" : "Add knowledge source"}
-            </h3>
-            <p className="mt-1 text-sm text-muted-foreground">
-              Add website copy, pitch notes, product docs, transcripts, proof points, or customer-safe claims.
-            </p>
-          </div>
-          {isEditing && (
-            <Button variant="ghost" size="sm" onClick={resetForm}>Cancel</Button>
-          )}
-        </div>
-
-        <div className="mt-5 grid gap-4">
-          <div className="grid gap-4 md:grid-cols-2">
+      <div className="grid gap-5 lg:grid-cols-[1.2fr_0.8fr]">
+        <Card className="p-5">
+          <div className="flex flex-col justify-between gap-3 md:flex-row md:items-start">
             <div>
-              <FieldLabel label="Source name" htmlFor="library-source-name" />
-              <input
-                id="library-source-name"
-                value={form.name}
-                onChange={(event) => updateForm("name", event.target.value)}
-                className="mt-2 h-11 w-full rounded-md border border-input bg-white px-3 outline-none focus:ring-2 focus:ring-ring"
-                placeholder="Conduit positioning, homepage copy, customer proof..."
-              />
+              <h3 className="text-lg font-bold">Knowledge sources</h3>
+              <p className="mt-1 text-sm text-muted-foreground">Add or select source-of-truth material for future posts.</p>
             </div>
-            <div>
-              <FieldLabel label="Source type" htmlFor="library-source-category" />
-              <select
-                id="library-source-category"
-                value={form.category}
-                onChange={(event) => updateForm("category", event.target.value as LibrarySourceCategory)}
-                className="mt-2 h-11 w-full rounded-md border border-input bg-white px-3 outline-none focus:ring-2 focus:ring-ring"
-              >
-                {librarySourceCategories.map((category) => <option key={category} value={category}>{category}</option>)}
-              </select>
-            </div>
+            <Pill>{storageMode === "supabase" ? "Shared workspace" : "Local mode"}</Pill>
           </div>
-
-          <div>
-            <FieldLabel label="Paste URL or text" htmlFor="library-source-urls" />
-            <textarea
-              id="library-source-urls"
-              value={form.urls}
-              onChange={(event) => updateForm("urls", event.target.value)}
-              className="mt-2 min-h-24 w-full rounded-md border border-input bg-white p-4 text-sm leading-6 outline-none focus:ring-2 focus:ring-ring"
-              placeholder="Paste a public website URL, source link, or short source text. Longer text can go below."
-            />
-          </div>
-
-          <div>
-            <FieldLabel label="Pasted content" htmlFor="library-source-content" />
-            <textarea
-              id="library-source-content"
-              value={form.content}
-              onChange={(event) => updateForm("content", event.target.value)}
-              className="mt-2 min-h-[140px] w-full rounded-md border border-input bg-white p-4 text-sm leading-6 outline-none focus:ring-2 focus:ring-ring"
-              placeholder="Paste website copy, product notes, pitch language, transcript excerpts, or proof points..."
-            />
-          </div>
-
-          <div className="grid gap-4 md:grid-cols-[1fr_1fr]">
-            <div>
-              <FieldLabel label="Upload document" htmlFor="knowledge-form-document" />
-              <input
-                id="knowledge-form-document"
-                type="file"
-                accept={acceptedKnowledgeDocumentTypes.join(",")}
-                disabled={isExtractingFormDocument}
-                onChange={(event) => {
-                  void handleFormDocumentUpload(event.target.files?.[0]);
-                  event.currentTarget.value = "";
-                }}
-                className="mt-2 w-full rounded-md border border-input bg-white px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-ring"
-              />
-              {formDocumentMessage && <p className="mt-2 text-sm font-semibold text-primary">{formDocumentMessage}</p>}
-              {formDocumentError && <p className="mt-2 text-sm font-semibold text-red-700">{formDocumentError}</p>}
-            </div>
-            <div>
-              <FieldLabel label="Notes" htmlFor="library-source-notes" />
-              <input
-                id="library-source-notes"
-                value={form.notes}
-                onChange={(event) => updateForm("notes", event.target.value)}
-                className="mt-2 h-11 w-full rounded-md border border-input bg-white px-3 outline-none focus:ring-2 focus:ring-ring"
-                placeholder="When should this source be used?"
-              />
-            </div>
-          </div>
-
-          <Button variant="secondary" onClick={() => setShowAdvancedKnowledge((current) => !current)}>
-            {showAdvancedKnowledge ? "Hide advanced details" : "Advanced details"}
-          </Button>
-
-          {showAdvancedKnowledge && (
-            <div className="grid gap-4 rounded-md border border-border bg-muted p-4 md:grid-cols-3">
-              <div>
-                <FieldLabel label="Platform/material type" htmlFor="library-source-platform" />
-                <select
-                  id="library-source-platform"
-                  value={form.platform}
-                  onChange={(event) => updateForm("platform", event.target.value as LibrarySourcePlatform)}
-                  className="mt-2 h-11 w-full rounded-md border border-input bg-white px-3 outline-none focus:ring-2 focus:ring-ring"
-                >
-                  {librarySourcePlatforms.map((platform) => <option key={platform} value={platform}>{platform}</option>)}
-                </select>
-              </div>
-              <div>
-                <FieldLabel label="URL type" htmlFor="library-url-type" />
-                <select
-                  id="library-url-type"
-                  value={form.urlType}
-                  onChange={(event) => updateForm("urlType", event.target.value as SourceUrlType)}
-                  className="mt-2 h-11 w-full rounded-md border border-input bg-white px-3 outline-none focus:ring-2 focus:ring-ring"
-                >
-                  {sourceUrlTypes.map((type) => <option key={type} value={type}>{type}</option>)}
-                </select>
-              </div>
-              <div>
-                <FieldLabel label="Last checked" htmlFor="library-last-checked" />
-                <input
-                  id="library-last-checked"
-                  value={form.lastChecked}
-                  onChange={(event) => updateForm("lastChecked", event.target.value)}
-                  className="mt-2 h-11 w-full rounded-md border border-input bg-white px-3 outline-none focus:ring-2 focus:ring-ring"
-                />
-              </div>
-            </div>
-          )}
-
-          <div className="flex items-center justify-between gap-3">
-            {savedAt ? (
-              <span className="text-sm font-semibold text-primary">Saved {savedAt}</span>
-            ) : (
-              <span className="text-sm text-muted-foreground">Company Knowledge is used automatically in Create Post.</span>
-            )}
-            <Button onClick={saveSource}><Check size={16} /> Save source</Button>
-          </div>
-        </div>
-      </Card>
-
-      <Card className="p-5">
-        <div className="flex flex-col justify-between gap-3 md:flex-row md:items-end">
-          <div>
-            <h3 className="text-lg font-bold">Sources feeding the Conduit Brain</h3>
-            <p className="mt-1 max-w-2xl text-sm leading-6 text-muted-foreground">
-              Sources used in Brain are applied automatically when creating posts. Sources marked not used stay saved but do not influence generation.
-            </p>
-          </div>
-          <Pill>{activeSources.length} used in Brain</Pill>
-        </div>
-      </Card>
-
-      <div className="grid gap-2">
-        {librarySources.length === 0 ? (
-          <Card className="p-8 text-center">
-            <p className="font-semibold">No Company Knowledge yet.</p>
-            <p className="mt-2 text-sm text-muted-foreground">
-              Add website copy, pitch notes, product docs, transcripts, or proof points to turn on the Conduit brain.
-            </p>
-          </Card>
-        ) : (
-          librarySources.map((source) => (
-            <LibrarySourceCard
-              key={source.id}
-              source={source}
-              isSelected={activeSourceIds.includes(source.id)}
-              onToggle={() => toggleSourceActive(source.id)}
-              onRefresh={() => openDetails(source.id, "Settings")}
-              onDetails={() => openDetails(source.id, "Overview")}
-              onDelete={() => deleteSource(source.id)}
-            />
-          ))
-        )}
-      </div>
-
-      {detailSource && (
-        <KnowledgeSourceDetailsPanel
-          source={detailSource}
-          isSelected={activeSourceIds.includes(detailSource.id)}
-          initialTab={detailInitialTab}
-          storageMode={storageMode}
-          onClose={() => setDetailSourceId("")}
-          onToggle={() => toggleSourceActive(detailSource.id)}
-          onEdit={() => {
-            editSource(detailSource);
-            setDetailSourceId("");
-          }}
-          onDelete={() => deleteSource(detailSource.id)}
-          onRefresh={(content) => refreshSource(detailSource.id, content)}
-          onSaveSource={saveSourceRecord}
-        />
-      )}
-    </div>
-  );
-}
-
-type ConduitBrainTheme = {
-  name: string;
-  summary: string;
-  sourceIds: string[];
-  sourceNames: string[];
-  sourceDetails: Array<{ id: string; name: string; type: string }>;
-  angles: string[];
-  approvedPosts: string[];
-  contentAngle: ContentAngle;
-};
-
-type ConduitBrainMapData = {
-  themes: ConduitBrainTheme[];
-  proofPoints: string[];
-  approvedClaims: string[];
-  reviewClaims: string[];
-  avoid: string[];
-};
-
-function ConduitBrainMap({
-  brainMap,
-  sourceCount,
-  totalWords,
-  lastUpdated,
-  onCreatePostFromTheme
-}: {
-  brainMap: ConduitBrainMapData;
-  sourceCount: number;
-  totalWords: number;
-  lastUpdated: string;
-  onCreatePostFromTheme: (theme: ConduitBrainTheme) => void;
-}) {
-  const hasBrainContent = sourceCount > 0 && totalWords > 0;
-  const [selectedTheme, setSelectedTheme] = useState<ConduitBrainTheme | null>(null);
-  const [showAllProofPoints, setShowAllProofPoints] = useState(false);
-  const [showAllGuardrails, setShowAllGuardrails] = useState(false);
-  const guardrails = [
-    ...brainMap.approvedClaims.map((claim) => `Approved: ${claim}`),
-    ...brainMap.reviewClaims.map((claim) => `Review: ${claim}`),
-    ...brainMap.avoid.map((claim) => `Avoid: ${claim}`)
-  ];
-
-  return (
-    <Card className="p-5">
-      <div className="flex flex-col justify-between gap-3 lg:flex-row lg:items-start">
-        <div>
-          <p className="text-xs font-extrabold uppercase tracking-[0.16em] text-primary">Conduit Brain Map</p>
-          <h3 className="mt-1 text-xl font-extrabold tracking-tight">Themes, proof points, and reusable angles</h3>
-          <p className="mt-1 max-w-2xl text-sm leading-6 text-muted-foreground">
-            A lightweight map of what the Conduit brain knows right now. It is built from loaded Company Knowledge and approved examples.
-          </p>
-        </div>
-        <div className="grid gap-2 sm:grid-cols-3 lg:min-w-[420px]">
-          <BrainStatusItem label="Sources loaded" value={sourceCount} />
-          <BrainStatusItem label="Total words" value={totalWords} />
-          <BrainStatusItem label="Themes detected" value={brainMap.themes.length} />
-          <BrainStatusItem label="Proof points" value={brainMap.proofPoints.length} />
-          <BrainStatusItem label="Claims / guardrails" value={brainMap.approvedClaims.length + brainMap.reviewClaims.length + brainMap.avoid.length} />
-          <BrainStatusItem label="Last updated" value={lastUpdated} />
-        </div>
-      </div>
-
-      {!hasBrainContent ? (
-        <div className="mt-5 rounded-lg border border-dashed border-slate-300 bg-slate-50 p-5 text-sm text-muted-foreground">
-          Add website copy, docs, transcripts, or proof points to build the Conduit Brain.
-        </div>
-      ) : (
-        <div className="mt-6 grid gap-5">
-          <div>
-            <p className="text-xs font-extrabold uppercase tracking-wide text-muted-foreground">Themes</p>
-            {brainMap.themes.length === 0 ? (
-              <div className="mt-3 rounded-lg border border-dashed border-slate-300 bg-slate-50 p-5 text-sm text-muted-foreground">
-                Add more specific source material to detect themes.
+          <div className="mt-4 grid gap-3">
+            {librarySources.length === 0 ? (
+              <div className="rounded-lg border border-dashed border-slate-200 p-6 text-sm text-muted-foreground">
+                Add a website, transcript, product note, customer story, or proof point to start feeding the Conduit Brain.
               </div>
             ) : (
-              <div className="mt-3 grid gap-3 lg:grid-cols-2">
-                {brainMap.themes.map((theme) => (
-                  <div key={theme.name} className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm transition hover:border-teal-200 hover:shadow-md">
-                    <div className="flex h-full flex-col justify-between gap-4">
-                      <div>
-                        <h4 className="font-extrabold">{theme.name}</h4>
-                        <p className="mt-2 text-sm leading-6 text-muted-foreground">{theme.summary}</p>
-                        <div className="mt-3 flex flex-wrap gap-2">
-                          <Pill>{theme.sourceIds.length} sources</Pill>
-                          <Pill>{theme.approvedPosts.length} approved posts</Pill>
-                        </div>
-                      </div>
+              librarySources.map((source) => (
+                <div key={source.id} className="rounded-lg border border-slate-200 bg-white p-4">
+                  <div className="flex flex-col justify-between gap-3 md:flex-row md:items-start">
+                    <div>
                       <div className="flex flex-wrap gap-2">
-                        <Button size="sm" onClick={() => onCreatePostFromTheme(theme)}>
-                          Use in post
-                        </Button>
-                        <Button size="sm" variant="secondary" onClick={() => setSelectedTheme(theme)}>
-                          Details
-                        </Button>
+                        <Pill>{source.category}</Pill>
+                        <Pill>{source.reviewStatus ?? "Needs review"}</Pill>
+                        {selectedLibrarySourceIds.includes(source.id) && <Pill>Selected</Pill>}
                       </div>
+                      <h4 className="mt-2 font-bold">{getLibrarySourceDisplayName(source)}</h4>
+                      <p className="mt-1 line-clamp-2 text-sm leading-6 text-muted-foreground">
+                        {source.content || source.notes || source.urls || "No source body saved yet."}
+                      </p>
+                    </div>
+                    <div className="flex flex-wrap gap-2">
+                      <Button size="sm" variant="secondary" onClick={() => toggleSource(source.id)}>
+                        {selectedLibrarySourceIds.includes(source.id) ? "Unselect" : "Use in post"}
+                      </Button>
+                      <Button size="sm" variant="secondary" onClick={() => startPostFromSource(source)}>
+                        Create post
+                      </Button>
+                      <Button size="sm" variant="danger" onClick={() => removeLibrarySource(source.id)}>
+                        Delete
+                      </Button>
                     </div>
                   </div>
-                ))}
-              </div>
+                </div>
+              ))
             )}
           </div>
+        </Card>
 
-          <div className="grid gap-4 lg:grid-cols-2">
-            <CompactBrainList
-              title="Proof Points"
-              emptyText="No supported proof points detected yet."
-              items={brainMap.proofPoints}
-              showAll={showAllProofPoints}
-              onToggle={() => setShowAllProofPoints((current) => !current)}
-            />
-
-            <CompactBrainList
-              title="Claims / Guardrails"
-              emptyText="No guardrails detected yet."
-              items={guardrails}
-              showAll={showAllGuardrails}
-              onToggle={() => setShowAllGuardrails((current) => !current)}
-            />
+        <Card className="p-5">
+          <h3 className="text-lg font-bold">Add source</h3>
+          <div className="mt-4 grid gap-3">
+            <FieldLabel label="Source title">
+              <input value={sourceName} onChange={(event) => setSourceName(event.target.value)} className="mt-2 h-10 w-full rounded-md border border-input px-3 text-sm" placeholder="Factory automation positioning notes" />
+            </FieldLabel>
+            <div className="grid gap-3 sm:grid-cols-2">
+              <FieldLabel label="Type">
+                <select value={sourceCategory} onChange={(event) => setSourceCategory(event.target.value as LibrarySourceCategory)} className="mt-2 h-10 w-full rounded-md border border-input px-3 text-sm">
+                  {librarySourceCategories.map((category) => <option key={category} value={category}>{category}</option>)}
+                </select>
+              </FieldLabel>
+              <FieldLabel label="Platform">
+                <select value={sourcePlatform} onChange={(event) => setSourcePlatform(event.target.value as LibrarySourcePlatform)} className="mt-2 h-10 w-full rounded-md border border-input px-3 text-sm">
+                  {librarySourcePlatforms.map((platform) => <option key={platform} value={platform}>{platform}</option>)}
+                </select>
+              </FieldLabel>
+            </div>
+            <FieldLabel label="URL or source reference">
+              <input value={sourceUrls} onChange={(event) => setSourceUrls(event.target.value)} className="mt-2 h-10 w-full rounded-md border border-input px-3 text-sm" />
+            </FieldLabel>
+            <FieldLabel label="Facts / notes">
+              <textarea value={sourceContent} onChange={(event) => setSourceContent(event.target.value)} className="mt-2 min-h-28 w-full rounded-md border border-input p-3 text-sm" />
+            </FieldLabel>
+            <FieldLabel label="Internal notes">
+              <textarea value={sourceNotes} onChange={(event) => setSourceNotes(event.target.value)} className="mt-2 min-h-20 w-full rounded-md border border-input p-3 text-sm" />
+            </FieldLabel>
+            <Button onClick={addSource} disabled={!sourceName.trim() && !sourceContent.trim() && !sourceUrls.trim()}>
+              <Plus size={16} /> Save to Company Knowledge
+            </Button>
           </div>
-        </div>
-      )}
-
-      {selectedTheme && (
-        <ThemeDetailsPanel
-          theme={selectedTheme}
-          onClose={() => setSelectedTheme(null)}
-          onCreatePost={() => onCreatePostFromTheme(selectedTheme)}
-        />
-      )}
-    </Card>
-  );
-}
-
-function CompactBrainList({
-  title,
-  emptyText,
-  items,
-  showAll,
-  onToggle
-}: {
-  title: string;
-  emptyText: string;
-  items: string[];
-  showAll: boolean;
-  onToggle: () => void;
-}) {
-  const visibleItems = showAll ? items : items.slice(0, 3);
-
-  return (
-    <div className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
-      <div className="flex items-center justify-between gap-3">
-        <p className="text-xs font-extrabold uppercase tracking-wide text-muted-foreground">{title}</p>
-        {items.length > 3 && (
-          <Button size="sm" variant="ghost" onClick={onToggle}>
-            {showAll ? "Show less" : `Show ${items.length - 3} more`}
-          </Button>
-        )}
+        </Card>
       </div>
-      {items.length === 0 ? (
-        <p className="mt-3 text-sm text-muted-foreground">{emptyText}</p>
-      ) : (
-        <ul className="mt-3 grid gap-2 text-sm leading-6">
-          {visibleItems.map((item) => <li key={item} className="rounded-md bg-slate-50 px-3 py-2">{item}</li>)}
-        </ul>
-      )}
-    </div>
-  );
-}
 
-function ThemeDetailsPanel({
-  theme,
-  onClose,
-  onCreatePost
-}: {
-  theme: ConduitBrainTheme;
-  onClose: () => void;
-  onCreatePost: () => void;
-}) {
-  const [activeTab, setActiveTab] = useState<"Overview" | "Useful post angles" | "Related sources" | "Related approved posts">("Overview");
-  const tabs = ["Overview", "Useful post angles", "Related sources", "Related approved posts"] as const;
-
-  return (
-    <div className="fixed inset-0 z-50 bg-slate-950/30 p-4">
-      <div className="ml-auto flex h-full max-w-2xl flex-col overflow-hidden rounded-lg border border-border bg-white shadow-2xl">
-        <div className="flex items-start justify-between gap-4 border-b border-border p-5">
-          <div>
-            <p className="text-xs font-bold uppercase text-primary">Theme details</p>
-            <h3 className="mt-1 text-xl font-bold">{theme.name}</h3>
-            <p className="mt-2 text-sm leading-6 text-muted-foreground">{theme.summary}</p>
-          </div>
-          <Button variant="ghost" onClick={onClose}>Close</Button>
-        </div>
-        <div className="flex flex-wrap gap-2 border-b border-border p-3">
-          {tabs.map((tab) => (
-            <button
-              key={tab}
-              onClick={() => setActiveTab(tab)}
-              className={cn(
-                "rounded-md px-3 py-2 text-sm font-bold",
-                activeTab === tab ? "bg-primary text-primary-foreground" : "bg-muted text-muted-foreground"
-              )}
-            >
-              {tab}
-            </button>
-          ))}
-        </div>
-        <div className="flex-1 overflow-y-auto p-5">
-          {activeTab === "Overview" && (
-            <div className="grid gap-4">
-              <div className="grid gap-3 sm:grid-cols-2">
-                <BrainStatusItem label="Related sources" value={theme.sourceIds.length} />
-                <BrainStatusItem label="Approved posts" value={theme.approvedPosts.length} />
-              </div>
-              <AnalysisBlock label="Summary" value={theme.summary} />
-              <Button onClick={onCreatePost}>Use in post</Button>
-            </div>
-          )}
-
-          {activeTab === "Useful post angles" && (
-            <div className="grid gap-3">
-              {theme.angles.map((angle) => (
-                <div key={angle} className="rounded-md border border-border bg-muted p-4 text-sm leading-6">
-                  {angle}
-                </div>
-              ))}
-            </div>
-          )}
-
-          {activeTab === "Related sources" && (
-            <div className="grid gap-3">
-              {theme.sourceDetails.length === 0 ? (
-                <p className="text-sm text-muted-foreground">No related sources tied to this theme yet.</p>
-              ) : (
-                theme.sourceDetails.map((source) => (
-                  <div key={source.id} className="rounded-md border border-border bg-muted p-4">
-                    <p className="font-bold">{source.name}</p>
-                    <p className="mt-1 text-sm text-muted-foreground">{source.type}</p>
-                  </div>
-                ))
-              )}
-            </div>
-          )}
-
-          {activeTab === "Related approved posts" && (
-            <div className="grid gap-3">
-              {theme.approvedPosts.length === 0 ? (
-                <p className="text-sm text-muted-foreground">No approved posts tied to this theme yet.</p>
-              ) : (
-                theme.approvedPosts.map((post) => (
-                  <div key={post} className="whitespace-pre-wrap rounded-md border border-border bg-muted p-4 text-sm leading-6">
-                    {post}
-                  </div>
-                ))
-              )}
-            </div>
-          )}
-        </div>
-      </div>
-    </div>
-  );
-}
-
-const conduitBrainThemeSeeds: Array<{
-  name: string;
-  keywords: string[];
-  summary: string;
-  angles: string[];
-  contentAngle: ContentAngle;
-}> = [
-  {
-    name: "Deployment speed",
-    keywords: ["deploy", "deployment", "launched", "launch", "days", "weeks", "months", "fast", "speed", "implementation", "rollout"],
-    summary: "Conduit helps industrial teams move from idea to working automation faster than traditional project cycles.",
-    angles: [
-      "Show what changed between the old deployment path and the Conduit path.",
-      "Turn a fast build or launch into a founder-led proof point.",
-      "Explain why speed matters when factories need working systems, not slideware."
-    ],
-    contentAngle: "Deployment win"
-  },
-  {
-    name: "System integrator problem",
-    keywords: ["system integrator", "integrator", "integration", "handoff", "vendor", "project", "custom project", "legacy", "manual coordination"],
-    summary: "Traditional automation work often gets trapped in long integration projects, handoffs, and brittle custom work.",
-    angles: [
-      "Name the hidden cost of relying on one-off system integrator projects.",
-      "Explain how Conduit changes the coordination layer around automation.",
-      "Contrast slow bespoke projects with reusable operational infrastructure."
-    ],
-    contentAngle: "Industry POV"
-  },
-  {
-    name: "Factory OS / orchestration",
-    keywords: ["factory os", "orchestration", "workflow", "workflows", "operations", "operational", "apps", "system", "systems", "control layer"],
-    summary: "Conduit is framed as an orchestration layer for factory workflows, systems, and operational apps.",
-    angles: [
-      "Explain what a Factory OS needs to coordinate in the real world.",
-      "Show how workflows connect people, machines, and operational systems.",
-      "Make the invisible orchestration layer feel concrete."
-    ],
-    contentAngle: "Technical explanation"
-  },
-  {
-    name: "Robotics and automation",
-    keywords: ["robot", "robots", "robotics", "automation", "machine", "machines", "sensor", "sensors", "hardware", "plc", "industrial automation"],
-    summary: "Conduit sits close to industrial hardware, robotics, machines, sensors, and real automation constraints.",
-    angles: [
-      "Show the difference between software-only AI and automation that touches the floor.",
-      "Use media from workshops, factories, or hardware tests as credibility.",
-      "Explain how robots and machines become useful when workflows coordinate them."
-    ],
-    contentAngle: "Behind the scenes"
-  },
-  {
-    name: "Manufacturing labor gap",
-    keywords: ["labor", "workforce", "operator", "operators", "shortage", "hiring", "labor gap", "skills gap", "frontline"],
-    summary: "Conduit can be positioned around helping industrial teams do more with constrained labor and scarce operational expertise.",
-    angles: [
-      "Discuss the operational pressure created by labor shortages.",
-      "Frame automation as a way to support operators, not replace context.",
-      "Connect AI-native operations to the reality of frontline constraints."
-    ],
-    contentAngle: "Industry POV"
-  },
-  {
-    name: "Industrial sovereignty",
-    keywords: ["sovereignty", "industrial base", "domestic", "reshoring", "resilience", "supply chain", "national", "manufacturing capacity"],
-    summary: "Conduit can connect factory automation to resilient domestic industrial capacity when sources support it.",
-    angles: [
-      "Tie factory software to national industrial resilience.",
-      "Explain why speed and automation matter for manufacturing capacity.",
-      "Make the industrial sovereignty angle concrete through operating examples."
-    ],
-    contentAngle: "Industry POV"
-  },
-  {
-    name: "Customer proof",
-    keywords: ["customer", "case study", "proof", "result", "outcome", "before", "after", "saved", "reduced", "increased", "pilot"],
-    summary: "Customer-safe proof points and before/after stories can anchor posts in outcomes instead of abstract claims.",
-    angles: [
-      "Turn a customer-safe outcome into a concise proof post.",
-      "Explain the operational before and after without over-sharing.",
-      "Use one concrete proof point to make the broader Conduit thesis believable."
-    ],
-    contentAngle: "Customer proof"
-  },
-  {
-    name: "AI-native operations",
-    keywords: ["ai", "ai-native", "agent", "agents", "autonomous", "intelligent", "model", "automation", "operations", "reasoning"],
-    summary: "Conduit can describe how AI becomes useful when grounded in real operational context and workflows.",
-    angles: [
-      "Explain what AI-native operations means in practical factory terms.",
-      "Show how AI becomes useful when it can act through workflows.",
-      "Avoid vague AI language by tying the point to real systems and operators."
-    ],
-    contentAngle: "Technical explanation"
-  }
-];
-
-const conduitProofPointSeeds: Array<{
-  text: string;
-  keywords: string[];
-  requiredMatches?: number;
-}> = [
-  {
-    text: "Deploy in days, not months",
-    keywords: ["deploy", "deployment", "days", "months"],
-    requiredMatches: 3
-  },
-  {
-    text: "Connects robots, machines, sensors, and operational apps",
-    keywords: ["robots", "robotics", "machines", "sensors", "operational apps", "workflows"],
-    requiredMatches: 2
-  },
-  {
-    text: "Reduces reliance on long system integrator projects",
-    keywords: ["system integrator", "integrator", "long projects", "custom projects", "handoff"],
-    requiredMatches: 2
-  },
-  {
-    text: "Starts from real workflows, hardware constraints, and operator context",
-    keywords: ["workflow", "workflows", "hardware", "operator", "operators", "factory floor"],
-    requiredMatches: 2
-  },
-  {
-    text: "Turns messy handoffs and manual coordination into dependable automation",
-    keywords: ["handoff", "handoffs", "manual", "coordination", "automation", "workflow"],
-    requiredMatches: 2
-  }
-];
-
-function buildConduitBrainMap(
-  sources: LibrarySource[],
-  approvedPosts: ApprovedPostMemory[],
-  brandVoice: BrandVoiceProfile
-): ConduitBrainMapData {
-  const loadedSources = sources.filter((source) => source.content.trim() || source.notes.trim() || source.urls.trim());
-  const combinedContent = loadedSources.map(sourceSearchText).join("\n").toLowerCase();
-  const themes = conduitBrainThemeSeeds
-    .map((seed) => {
-      const relatedSources = loadedSources.filter((source) =>
-        seed.keywords.some((keyword) => sourceSearchText(source).toLowerCase().includes(keyword))
-      );
-      if (relatedSources.length === 0) return null;
-
-      const relatedApprovedPosts = approvedPosts
-        .filter((post) => seed.keywords.some((keyword) => approvedPostSearchText(post).toLowerCase().includes(keyword)))
-        .slice(0, 3)
-        .map((post) => `${post.platform}: ${truncateText(userFacingPostContent(post.finalContent), 130)}`);
-
-      return {
-        name: seed.name,
-        summary: seed.summary,
-        sourceIds: relatedSources.map((source) => source.id),
-        sourceNames: relatedSources.map(getLibrarySourceDisplayName),
-        sourceDetails: relatedSources.map((source) => ({
-          id: source.id,
-          name: getLibrarySourceDisplayName(source),
-          type: String(source.category || source.platform)
-        })),
-        angles: seed.angles,
-        approvedPosts: relatedApprovedPosts,
-        contentAngle: seed.contentAngle
-      };
-    })
-    .filter((theme): theme is ConduitBrainTheme => Boolean(theme));
-
-  const proofPoints = conduitProofPointSeeds
-    .filter((seed) => countKeywordMatches(combinedContent, seed.keywords) >= (seed.requiredMatches ?? 1))
-    .map((seed) => seed.text);
-
-  const approvedClaims = proofPoints.slice(0, 5);
-  const reviewClaims = buildReviewClaims(combinedContent, themes, proofPoints);
-  const avoid = splitGuidanceList(brandVoice.avoid)
-    .concat(loadedSources.map((source) => source.analysis.avoid).flatMap(splitGuidanceList))
-    .concat([
-      "Do not invent customer metrics or deployment timelines that are not in Company Knowledge.",
-      "Do not imply social account syncing, scraping, or live publishing is enabled."
-    ])
-    .filter(Boolean);
-
-  return {
-    themes,
-    proofPoints,
-    approvedClaims,
-    reviewClaims,
-    avoid: uniqueStrings(avoid).slice(0, 8)
-  };
-}
-
-function sourceSearchText(source: LibrarySource) {
-  return [
-    source.name,
-    source.category,
-    source.platform,
-    source.urls,
-    source.content,
-    source.notes,
-    source.analysis.commonTopics,
-    source.analysis.proofPoints,
-    source.analysis.bestUseCases
-  ].filter(Boolean).join("\n");
-}
-
-function approvedPostSearchText(post: ApprovedPostMemory) {
-  return [
-    post.finalContent,
-    post.contentAngle,
-    post.supportingFields?.rationale,
-    post.supportingFields?.recommendedMediaUse,
-    post.supportingFields?.cta,
-    post.supportingFields?.hashtags?.join(" ")
-  ].filter(Boolean).join("\n");
-}
-
-function countKeywordMatches(value: string, keywords: string[]) {
-  return keywords.reduce((count, keyword) => count + (value.includes(keyword.toLowerCase()) ? 1 : 0), 0);
-}
-
-function splitGuidanceList(value?: string) {
-  return String(value ?? "")
-    .split(/\n|,|;/)
-    .map((item) => item.trim())
-    .filter(Boolean);
-}
-
-function uniqueStrings(values: string[]) {
-  return Array.from(new Set(values.map((value) => value.trim()).filter(Boolean)));
-}
-
-function truncateText(value: string, maxLength: number) {
-  if (value.length <= maxLength) return value;
-  return `${value.slice(0, maxLength - 3).trim()}...`;
-}
-
-function buildReviewClaims(content: string, themes: ConduitBrainTheme[], proofPoints: string[]) {
-  const claims: string[] = [];
-  const hasTheme = (name: string) => themes.some((theme) => theme.name === name);
-
-  if (hasTheme("Deployment speed") && !proofPoints.includes("Deploy in days, not months")) {
-    claims.push("Specific deployment timelines need source-backed numbers before posting.");
-  }
-  if (content.includes("customer") || hasTheme("Customer proof")) {
-    claims.push("Customer outcomes and names should be checked before publishing.");
-  }
-  if (content.includes("ai") || content.includes("agent") || hasTheme("AI-native operations")) {
-    claims.push("AI autonomy claims should stay grounded in actual workflow capabilities.");
-  }
-  if (content.includes("sovereignty") || hasTheme("Industrial sovereignty")) {
-    claims.push("Industrial sovereignty claims should be tied to supported operating examples.");
-  }
-
-  return uniqueStrings(claims).slice(0, 5);
-}
-
-function BrainStatusItem({ label, value }: { label: string; value: React.ReactNode }) {
-  return (
-    <div className="rounded-lg border border-slate-200 bg-white p-3 shadow-sm">
-      <p className="text-xs font-extrabold uppercase tracking-wide text-muted-foreground">{label}</p>
-      <p className="mt-1 text-lg font-extrabold">{value}</p>
-    </div>
-  );
-}
-
-type KnowledgeDetailTab = "Overview" | "Content" | "Analysis" | "Sources / Files" | "Settings";
-
-function LibrarySourceCard({
-  source,
-  isSelected,
-  onToggle,
-  onRefresh,
-  onDetails,
-  onDelete
-}: {
-  source: LibrarySource;
-  isSelected: boolean;
-  onToggle: () => void;
-  onRefresh: () => void;
-  onDetails: () => void;
-  onDelete: () => void;
-}) {
-  const displayName = getLibrarySourceDisplayName(source);
-  const lastUpdated = formatShortDate(source.updatedAt || getLastChecked(source));
-
-  return (
-    <Card className={cn("p-3 transition hover:border-teal-200 hover:shadow-md", isSelected && "border-primary bg-teal-50/60")}>
-      <div className="flex flex-col justify-between gap-3 lg:flex-row lg:items-center">
-        <div className="min-w-0">
-          <div className="flex flex-wrap items-center gap-2 text-sm">
-            <h3 className="truncate text-base font-extrabold">{displayName}</h3>
-            <Pill>{source.category}</Pill>
-            <Pill>{countWords(source.content)} words</Pill>
-            <Pill>{isSelected ? "Used in Brain" : "Not used"}</Pill>
-            <Pill>Updated {lastUpdated}</Pill>
-          </div>
-        </div>
-        <div className="flex flex-wrap gap-2">
-          <Button size="sm" variant="secondary" onClick={onRefresh}>Refresh</Button>
-          <Button size="sm" variant="secondary" onClick={onDetails}>Details</Button>
-          <Button size="sm" variant={isSelected ? "primary" : "secondary"} onClick={onToggle}>
-            {isSelected ? "Exclude" : "Use"}
-          </Button>
-          <Button size="sm" variant="danger" onClick={onDelete}>Delete</Button>
-        </div>
-      </div>
-    </Card>
-  );
-}
-
-function getLibrarySourceDisplayName(source: LibrarySource) {
-  const rawName = source.name.trim();
-  if (rawName && !/^untitled(?: source| knowledge(?: item| source)?)?$/i.test(rawName)) {
-    return rawName;
-  }
-
-  const domain = firstDomainFromText(source.urls);
-  const uploadedFilename = source.documents?.[0]?.filename;
-  const date = formatShortDate(source.updatedAt || getLastChecked(source));
-
-  if (domain) return `${source.category || "Website"} Source - ${domain}`;
-  if (uploadedFilename) return `Uploaded ${uploadedFilename}`;
-  if (source.category === "Founder Social" || source.category === "Company Social") {
-    return `${source.category} Source - ${date}`;
-  }
-  if (source.platform === "Document") return `Uploaded Notes - ${date}`;
-  return `Knowledge Source - ${date}`;
-}
-
-function firstDomainFromText(value?: string) {
-  const firstUrl = String(value ?? "").match(/https?:\/\/[^\s,]+/i)?.[0];
-  if (!firstUrl) return "";
-  try {
-    return new URL(firstUrl).hostname.replace(/^www\./, "");
-  } catch {
-    return "";
-  }
-}
-
-function KnowledgeSourceDetailsPanel({
-  source,
-  isSelected,
-  initialTab,
-  storageMode,
-  onClose,
-  onToggle,
-  onEdit,
-  onDelete,
-  onRefresh,
-  onSaveSource
-}: {
-  source: LibrarySource;
-  isSelected: boolean;
-  initialTab: KnowledgeDetailTab;
-  storageMode: StorageMode;
-  onClose: () => void;
-  onToggle: () => void;
-  onEdit: () => void;
-  onDelete: () => void;
-  onRefresh: (content: string) => void;
-  onSaveSource: (source: LibrarySource) => void;
-}) {
-  const [activeTab, setActiveTab] = useState<KnowledgeDetailTab>(initialTab);
-  const [refreshText, setRefreshText] = useState("");
-  const [settingsName, setSettingsName] = useState(source.name);
-  const [settingsCategory, setSettingsCategory] = useState<LibrarySourceCategory>(source.category);
-  const [settingsNotes, setSettingsNotes] = useState(source.notes);
-  const [settingsContent, setSettingsContent] = useState(source.content);
-  const [isFetchingWebsite, setIsFetchingWebsite] = useState(false);
-  const [fetchMessage, setFetchMessage] = useState("");
-  const [fetchError, setFetchError] = useState("");
-  const [isExtractingDocument, setIsExtractingDocument] = useState(false);
-  const [documentMessage, setDocumentMessage] = useState("");
-  const [documentError, setDocumentError] = useState("");
-  const websiteUrl = firstWebsiteUrl(source.urls);
-  const displayName = getLibrarySourceDisplayName(source);
-
-  useEffect(() => {
-    setActiveTab(initialTab);
-  }, [initialTab, source.id]);
-
-  useEffect(() => {
-    setSettingsName(source.name);
-    setSettingsCategory(source.category);
-    setSettingsNotes(source.notes);
-    setSettingsContent(source.content);
-    setFetchMessage("");
-    setFetchError("");
-    setDocumentMessage("");
-    setDocumentError("");
-  }, [source]);
-
-  function saveRefresh() {
-    if (!refreshText.trim()) return;
-    onRefresh(refreshText);
-    setRefreshText("");
-    setFetchMessage(`Manual refresh saved ${currentCheckedAt()}.`);
-  }
-
-  async function fetchWebsiteContent() {
-    if (!websiteUrl) {
-      setFetchError("Add a public website URL first.");
-      return;
-    }
-
-    setIsFetchingWebsite(true);
-    setFetchError("");
-    setFetchMessage("");
-
-    try {
-      const response = await fetch("/api/fetch-url", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ url: websiteUrl })
-      });
-      const payload = await readJsonResponse(response, "Website fetch failed");
-      if (!response.ok) throw new Error(payload?.error ?? "Could not fetch website content.");
-
-      const fetchedAt = payload.fetched_at
-        ? new Date(payload.fetched_at).toLocaleString()
-        : new Date().toLocaleString();
-      const fetchedContent = [
-        `Fetched from ${payload.title || source.name}`,
-        `Source URL: ${payload.sourceUrl || websiteUrl}`,
-        `Fetched at: ${fetchedAt}`,
-        "",
-        payload.content
-      ].join("\n");
-      onRefresh(fetchedContent);
-      setFetchMessage(`Fetched "${payload.title || websiteUrl}" and added it to this source.`);
-    } catch (error) {
-      setFetchError(error instanceof Error ? error.message : "Could not fetch website content.");
-    } finally {
-      setIsFetchingWebsite(false);
-    }
-  }
-
-  async function handleDocumentUpload(file?: File | null) {
-    if (!file) return;
-    setIsExtractingDocument(true);
-    setDocumentMessage("");
-    setDocumentError("");
-
-    try {
-      const formData = new FormData();
-      formData.append("file", file);
-      const response = await fetch("/api/extract-document", { method: "POST", body: formData });
-      const payload = await readJsonResponse(response, "Document extraction failed");
-      if (!response.ok) throw new Error(payload?.error ?? "Could not extract text from this document.");
-
-      let storageData: { storagePath?: string; publicUrl?: string } | null = null;
-      if (storageMode === "supabase") {
-        storageData = await uploadKnowledgeDocumentToSupabase(source.id, file);
-      }
-      const uploadedAt = payload.uploaded_at ?? new Date().toISOString();
-      const extractedContent = [
-        `Extracted from document: ${payload.filename || file.name}`,
-        `File type: ${payload.file_type || file.type || "unknown"}`,
-        `Uploaded at: ${new Date(uploadedAt).toLocaleString()}`,
-        "",
-        payload.text
-      ].join("\n");
-      const checkedAt = currentCheckedAt();
-      const sourceBase: Omit<LibrarySource, "analysis"> = {
-        ...source,
-        content: [source.content, extractedContent].filter(Boolean).join("\n\n"),
-        lastChecked: checkedAt,
-        updatedAt: checkedAt,
-        documents: [
-          ...(source.documents ?? []),
-          {
-            id: `doc-${Date.now()}`,
-            filename: payload.filename || file.name,
-            fileType: payload.file_type || file.type || "unknown",
-            storagePath: storageData?.storagePath,
-            publicUrl: storageData?.publicUrl,
-            extractedTextLength: payload.extracted_text_length ?? String(payload.text ?? "").length,
-            uploadedAt
-          }
-        ]
-      };
-      onSaveSource({ ...sourceBase, analysis: createLibrarySourceAnalysis(sourceBase) });
-      setDocumentMessage(`Extracted ${payload.extracted_text_length ?? String(payload.text ?? "").length} characters from ${payload.filename || file.name}.`);
-    } catch (error) {
-      setDocumentError(error instanceof Error ? error.message : "Could not extract text from this document.");
-    } finally {
-      setIsExtractingDocument(false);
-    }
-  }
-
-  function saveSettings() {
-    const checkedAt = currentCheckedAt();
-    const sourceBase: Omit<LibrarySource, "analysis"> = {
-      ...source,
-      name: settingsName.trim() || source.name,
-      category: settingsCategory,
-      notes: settingsNotes.trim(),
-      content: settingsContent.trim(),
-      updatedAt: checkedAt
-    };
-    onSaveSource({ ...sourceBase, analysis: createLibrarySourceAnalysis(sourceBase) });
-    setFetchMessage("Settings saved.");
-  }
-
-  return (
-    <div className="fixed inset-0 z-50 flex justify-end bg-slate-950/30 p-3 backdrop-blur-sm">
-      <div className="flex h-full w-full max-w-4xl flex-col overflow-hidden rounded-lg border border-border bg-white shadow-xl">
-        <div className="flex items-start justify-between gap-3 border-b border-border p-5">
-          <div className="min-w-0">
-            <p className="text-xs font-bold uppercase text-primary">Knowledge source</p>
-            <h3 className="mt-1 truncate text-xl font-bold">{displayName}</h3>
-            {!source.name.trim() || /^untitled/i.test(source.name.trim()) ? (
-              <p className="mt-1 text-xs text-muted-foreground">Display name generated from source metadata.</p>
-            ) : null}
-          </div>
-          <Button variant="secondary" size="sm" onClick={onClose}>Close</Button>
-        </div>
-
-        <div className="border-b border-border px-5 py-3">
-          <div className="flex flex-wrap gap-2">
-            {(["Overview", "Content", "Analysis", "Sources / Files", "Settings"] as const).map((tab) => (
-              <button
-                key={tab}
-                type="button"
-                onClick={() => setActiveTab(tab)}
-                className={cn(
-                  "rounded-md px-3 py-2 text-sm font-bold transition",
-                  activeTab === tab ? "bg-primary text-primary-foreground" : "bg-muted text-muted-foreground hover:text-foreground"
-                )}
-              >
-                {tab}
-              </button>
-            ))}
-          </div>
-        </div>
-
-        <div className="min-h-0 flex-1 overflow-y-auto p-5">
-          {activeTab === "Overview" && (
-            <div className="grid gap-4 md:grid-cols-2">
-              <BriefItem label="Display name" value={displayName} />
-              <BriefItem label="Saved name" value={source.name || "No saved name"} />
-              <BriefItem label="Source type" value={source.category} />
-              <BriefItem label="Word count" value={`${countWords(source.content)} words`} />
-              <BriefItem label="Last updated" value={formatShortDate(source.updatedAt || getLastChecked(source))} />
-              <BriefItem label="Brain status" value={isSelected ? "Used in Brain" : "Not used"} />
-              <AnalysisBlock label="Notes" value={source.notes || "No notes yet."} />
-              <div className="flex flex-wrap gap-2 md:col-span-2">
-                <Button variant={isSelected ? "primary" : "secondary"} onClick={onToggle}>{isSelected ? "Exclude from Brain" : "Use in Brain"}</Button>
-                <Button variant="secondary" onClick={onEdit}>Edit in form</Button>
-              </div>
-            </div>
-          )}
-
-          {activeTab === "Content" && (
-            <pre className="whitespace-pre-wrap rounded-md border border-border bg-muted p-4 text-sm leading-6">
-              {source.content || "No pasted, fetched, or extracted content yet."}
-            </pre>
-          )}
-
-          {activeTab === "Analysis" && (
-            <div className="grid gap-3 md:grid-cols-2">
-              <AnalysisBlock label="Voice traits" value={source.analysis.voiceTraits} />
-              <AnalysisBlock label="Common topics" value={source.analysis.commonTopics} />
-              <AnalysisBlock label="Repeated phrases" value={source.analysis.repeatedPhrases} />
-              <AnalysisBlock label="Strong hooks" value={source.analysis.strongHooks} />
-              <AnalysisBlock label="Proof points" value={source.analysis.proofPoints} />
-              <AnalysisBlock label="Things to avoid" value={source.analysis.avoid} />
-              <AnalysisBlock label="Best use cases" value={source.analysis.bestUseCases} />
-            </div>
-          )}
-
-          {activeTab === "Sources / Files" && (
-            <div className="grid gap-4">
-              <AnalysisBlock label="URLs" value={source.urls || "No URLs saved."} />
-              <div className="grid gap-3 md:grid-cols-3">
-                <BriefItem label="URL type" value={getUrlType(source)} />
-                <BriefItem label="Material type" value={source.platform} />
-                <BriefItem label="Last checked" value={getLastChecked(source)} />
-              </div>
-              <div>
-                <p className="text-sm font-bold uppercase text-muted-foreground">Uploaded documents</p>
-                <div className="mt-3 grid gap-2">
-                  {(source.documents ?? []).length === 0 ? (
-                    <p className="rounded-md border border-dashed border-border bg-muted p-4 text-sm text-muted-foreground">
-                      No documents uploaded yet.
-                    </p>
-                  ) : (
-                    (source.documents ?? []).map((document) => (
-                      <div key={document.id} className="rounded-md border border-border bg-muted p-3">
-                        <p className="font-semibold">{document.filename}</p>
-                        <p className="mt-1 text-sm text-muted-foreground">
-                          {document.fileType} · {document.extractedTextLength} extracted characters · {formatShortDate(document.uploadedAt)}
-                        </p>
-                      </div>
-                    ))
-                  )}
-                </div>
-              </div>
-            </div>
-          )}
-
-          {activeTab === "Settings" && (
-            <div className="grid gap-4">
-              <div className="grid gap-4 md:grid-cols-2">
-                <div>
-                  <FieldLabel label="Source name" htmlFor={`knowledge-name-${source.id}`} />
-                  <input
-                    id={`knowledge-name-${source.id}`}
-                    value={settingsName}
-                    onChange={(event) => setSettingsName(event.target.value)}
-                    className="mt-2 h-10 w-full rounded-md border border-input bg-white px-3 text-sm outline-none focus:ring-2 focus:ring-ring"
-                  />
-                </div>
-                <div>
-                  <FieldLabel label="Source type" htmlFor={`knowledge-type-${source.id}`} />
-                  <select
-                    id={`knowledge-type-${source.id}`}
-                    value={settingsCategory}
-                    onChange={(event) => setSettingsCategory(event.target.value as LibrarySourceCategory)}
-                    className="mt-2 h-10 w-full rounded-md border border-input bg-white px-3 text-sm outline-none focus:ring-2 focus:ring-ring"
-                  >
-                    {librarySourceCategories.map((category) => <option key={category} value={category}>{category}</option>)}
-                  </select>
-                </div>
-              </div>
-              <div>
-                <FieldLabel label="Notes" htmlFor={`knowledge-notes-${source.id}`} />
-                <input
-                  id={`knowledge-notes-${source.id}`}
-                  value={settingsNotes}
-                  onChange={(event) => setSettingsNotes(event.target.value)}
-                  className="mt-2 h-10 w-full rounded-md border border-input bg-white px-3 text-sm outline-none focus:ring-2 focus:ring-ring"
-                />
-              </div>
-              <div>
-                <FieldLabel label="Pasted content" htmlFor={`knowledge-content-${source.id}`} />
-                <textarea
-                  id={`knowledge-content-${source.id}`}
-                  value={settingsContent}
-                  onChange={(event) => setSettingsContent(event.target.value)}
-                  className="mt-2 min-h-40 w-full rounded-md border border-input bg-white p-3 text-sm leading-6 outline-none focus:ring-2 focus:ring-ring"
-                />
-              </div>
-
-              <div className="rounded-md border border-border bg-muted p-4">
-                <p className="font-bold">Refresh source material</p>
-                <div className="mt-3 grid gap-3 lg:grid-cols-[1fr_auto]">
-                  <textarea
-                    value={refreshText}
-                    onChange={(event) => setRefreshText(event.target.value)}
-                    className="min-h-24 w-full rounded-md border border-input bg-white p-3 text-sm leading-6 outline-none focus:ring-2 focus:ring-ring"
-                    placeholder="Paste new source content to append..."
-                  />
-                  <div className="flex flex-col gap-2">
-                    <Button size="sm" onClick={saveRefresh} disabled={!refreshText.trim()}>Save refresh</Button>
-                    {websiteUrl && <Button size="sm" variant="secondary" onClick={fetchWebsiteContent} disabled={isFetchingWebsite}>{isFetchingWebsite ? "Fetching..." : "Fetch website"}</Button>}
-                    <label className="inline-flex h-9 cursor-pointer items-center justify-center gap-2 rounded-md border border-input bg-white px-3 text-sm font-semibold text-foreground hover:bg-muted">
-                      <Upload size={14} /> {isExtractingDocument ? "Uploading..." : "Upload document"}
-                      <input
-                        type="file"
-                        accept={acceptedKnowledgeDocumentTypes.join(",")}
-                        className="hidden"
-                        disabled={isExtractingDocument}
-                        onChange={(event) => {
-                          void handleDocumentUpload(event.target.files?.[0]);
-                          event.currentTarget.value = "";
-                        }}
-                      />
-                    </label>
-                  </div>
-                </div>
-                {fetchMessage && <p className="mt-3 text-sm font-semibold text-primary">{fetchMessage}</p>}
-                {fetchError && <p className="mt-3 text-sm font-semibold text-red-700">{fetchError}</p>}
-                {documentMessage && <p className="mt-3 text-sm font-semibold text-primary">{documentMessage}</p>}
-                {documentError && <p className="mt-3 text-sm font-semibold text-red-700">{documentError}</p>}
-              </div>
-
-              <div className="flex flex-wrap justify-between gap-2">
-                <Button variant="danger" onClick={onDelete}>Delete source</Button>
-                <Button onClick={saveSettings}>Save settings</Button>
-              </div>
-            </div>
-          )}
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function latestKnowledgeUpdate(sources: LibrarySource[]) {
-  if (sources.length === 0) return "Never";
-  return sources
-    .map((source) => source.updatedAt || source.lastChecked || "Never")
-    .filter(Boolean)[0] ?? "Never";
-}
-
-function sourceTypesLoaded(sources: LibrarySource[]) {
-  const labels = new Set<string>();
-  sources.forEach((source) => {
-    const category = `${source.category} ${source.platform} ${source.urlType ?? ""}`.toLowerCase();
-    if (category.includes("website") || category.includes("blog")) labels.add("Website");
-    else if (category.includes("document") || category.includes("marketing") || category.includes("investor")) labels.add("Docs");
-    else if (category.includes("transcript")) labels.add("Transcripts");
-    else if (source.notes || source.content) labels.add("Notes");
-    else labels.add("Other");
-  });
-  return Array.from(labels).join(", ");
-}
-
-
-function MediaLibrary({
-  mediaAssets,
-  setMediaAssets,
-  persistMediaAsset,
-  removeMediaAsset,
-  campaigns,
-  approvedPosts,
-  onUseMediaAsset,
-  storageMode
-}: {
-  mediaAssets: MediaAsset[];
-  setMediaAssets: React.Dispatch<React.SetStateAction<MediaAsset[]>>;
-  persistMediaAsset: (asset: MediaAsset, file?: File | null) => Promise<MediaAsset>;
-  removeMediaAsset: (assetId: string) => void;
-  campaigns: Campaign[];
-  approvedPosts: ApprovedPostMemory[];
-  onUseMediaAsset: (asset: MediaAsset) => void;
-  storageMode: StorageMode;
-}) {
-  const [notes, setNotes] = useState("");
-  const [tags, setTags] = useState("");
-  const [isUploading, setIsUploading] = useState(false);
-  const [message, setMessage] = useState("");
-  const [error, setError] = useState("");
-  const [selectedAssetId, setSelectedAssetId] = useState("");
-  const selectedAsset = mediaAssets.find((asset) => asset.id === selectedAssetId);
-
-  async function handleUpload(file?: File | null) {
-    if (!file) return;
-
-    const mediaType = mediaTypeFromFile(file);
-    if (!mediaType) {
-      setError("Unsupported media type. Upload png, jpg, jpeg, webp, mp4, mov, webm, mp3, wav, or m4a.");
-      return;
-    }
-
-    setIsUploading(true);
-    setMessage("");
-    setError("");
-
-    const tagList = tags
-      .split(",")
-      .map((tag) => tag.trim())
-      .filter(Boolean)
-      .slice(0, 8);
-
-    try {
-      let analysis: Partial<MediaAsset> = {};
-      if (mediaType === "image") {
-        if (file.size > maxAiImageUploadBytes) {
-          setMessage("Large image saved without AI image analysis. Add notes to guide generation.");
-          analysis = {
-            description: notes || "Image saved. AI analysis was skipped because the file is large.",
-            suggestedAngles: notes ? [notes] : [],
-            sensitivityWarnings: [],
-            tags: tagList
-          };
-        } else {
-          const imageDataUrl = await readFileAsDataUrl(file);
-          const response = await fetch("/api/analyze-media", {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json"
-            },
-            body: JSON.stringify({
-              imageDataUrl,
-              filename: file.name,
-              notes
-            })
-          });
-          const payload = await readJsonResponse(response, "Image analysis failed");
-          if (response.ok && payload?.ok && payload.data) {
-            analysis = {
-              description: payload.data.description,
-              suggestedAngles: payload.data.suggestedAngles ?? [],
-              overlayText: payload.data.overlayText,
-              sensitivityWarnings: payload.data.sensitivityWarnings ?? [],
-              altText: payload.data.altText,
-              tags: tagList.length > 0 ? tagList : payload.data.tags ?? []
-            };
-          } else {
-            setMessage(payload?.error ?? "Saved without AI image analysis.");
-            analysis = {
-              description: "Image saved. AI analysis was not available.",
-              suggestedAngles: [],
-              sensitivityWarnings: [],
-              tags: tagList
-            };
-          }
-        }
-      } else {
-        analysis = {
-          description: "Video/audio transcription and frame analysis can be added later.",
-          suggestedAngles: [],
-          sensitivityWarnings: [],
-          tags: tagList
-        };
-      }
-
-      const localPreviewUrl = URL.createObjectURL(file);
-      const baseAsset: MediaAsset = {
-        id: `media-${Date.now()}`,
-        filename: file.name,
-        fileType: file.type || file.name.split(".").pop() || "unknown",
-        mediaType,
-        localPreviewUrl,
-        uploadedAt: new Date().toISOString(),
-        notes: notes.trim(),
-        tags: tagList,
-        ...analysis
-      };
-      const storedAsset = await persistMediaAsset(baseAsset, file);
-      const nextAsset = {
-        ...baseAsset,
-        ...storedAsset,
-        localPreviewUrl
-      };
-
-      setMediaAssets([nextAsset, ...mediaAssets.filter((asset) => asset.id !== nextAsset.id)]);
-      setMessage(
-        mediaType === "image"
-          ? "Media saved. Image analysis is ready when OpenAI is configured."
-          : "Media saved. Video/audio transcription and frame analysis can be added later."
-      );
-      setNotes("");
-      setTags("");
-    } catch (uploadError) {
-      setError(
-        uploadError instanceof Error
-          ? uploadError.message
-          : "Could not save that media asset."
-      );
-    } finally {
-      setIsUploading(false);
-    }
-  }
-
-  async function updateAsset(nextAsset: MediaAsset) {
-    setMediaAssets(
-      mediaAssets.map((asset) => asset.id === nextAsset.id ? nextAsset : asset)
-    );
-    const savedAsset = await persistMediaAsset(nextAsset, null);
-    setMediaAssets((current) =>
-      current.map((asset) => asset.id === nextAsset.id ? { ...asset, ...savedAsset } : asset)
-    );
-    setMessage("Media asset updated.");
-  }
-
-  function deleteAsset(assetId: string) {
-    removeMediaAsset(assetId);
-    if (selectedAssetId === assetId) {
-      setSelectedAssetId("");
-    }
-  }
-
-  return (
-    <div className="grid gap-5">
       <Card className="p-5">
         <div className="flex flex-col justify-between gap-3 md:flex-row md:items-start">
           <div>
-            <h3 className="text-lg font-bold">Media Library</h3>
-            <p className="mt-2 max-w-2xl text-sm leading-6 text-muted-foreground">
-              Save reusable photos, screenshots, videos, and audio for future Conduit posts. Images can be analyzed now; video/audio transcription and frame analysis can be added later.
-            </p>
-          </div>
-          <Pill>{storageMode === "supabase" ? "Shared media storage" : "Local media session"}</Pill>
-        </div>
-
-        <div className="mt-5 grid gap-4 rounded-lg border border-slate-200 bg-slate-50 p-4 lg:grid-cols-[1fr_1fr]">
-          <div>
-            <FieldLabel label="Upload media asset" htmlFor="media-library-upload" />
-            <input
-              id="media-library-upload"
-              type="file"
-              accept={acceptedMediaTypes.join(",")}
-              disabled={isUploading}
-              onChange={(event) => {
-                void handleUpload(event.target.files?.[0]);
-                event.currentTarget.value = "";
-              }}
-              className="mt-2 w-full rounded-md border border-input bg-white px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-ring"
-            />
-          </div>
-          <div className="grid gap-3 sm:grid-cols-2">
-            <div>
-              <FieldLabel label="Tags" htmlFor="media-library-tags" />
-              <input
-                id="media-library-tags"
-                value={tags}
-                onChange={(event) => setTags(event.target.value)}
-                className="mt-2 h-10 w-full rounded-md border border-input bg-white px-3 text-sm outline-none focus:ring-2 focus:ring-ring"
-                placeholder="factory, workshop, product"
-              />
-            </div>
-            <div>
-              <FieldLabel label="Notes" htmlFor="media-library-notes" />
-              <input
-                id="media-library-notes"
-                value={notes}
-                onChange={(event) => setNotes(event.target.value)}
-                className="mt-2 h-10 w-full rounded-md border border-input bg-white px-3 text-sm outline-none focus:ring-2 focus:ring-ring"
-                placeholder="What this asset shows"
-              />
-            </div>
+            <h3 className="text-lg font-bold">Claim Library</h3>
+            <p className="mt-1 text-sm text-muted-foreground">Approved claims can be reused. Needs-review and do-not-say claims help Brand Safety catch risky copy.</p>
           </div>
         </div>
-
-        {message && (
-          <p className="mt-4 rounded-md border border-teal-200 bg-teal-50 p-3 text-sm font-semibold text-teal-900">
-            {message}
-          </p>
-        )}
-        {error && (
-          <p className="mt-4 rounded-md border border-red-200 bg-red-50 p-3 text-sm font-semibold text-red-700">
-            {error}
-          </p>
-        )}
-      </Card>
-
-      {mediaAssets.length === 0 ? (
-        <Card className="p-8 text-center">
-          <p className="font-semibold">No reusable media yet.</p>
-          <p className="mt-2 text-sm text-muted-foreground">
-            Upload a photo, screenshot, video, or audio file to reuse it in future posts.
-          </p>
-        </Card>
-      ) : (
-        <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
-          {mediaAssets.map((asset) => (
-            <MediaAssetCard
-              key={asset.id}
-              asset={asset}
-              onUse={() => onUseMediaAsset(asset)}
-              onViewDetails={() => setSelectedAssetId(asset.id)}
-              onDelete={() => deleteAsset(asset.id)}
-            />
-          ))}
-        </div>
-      )}
-
-      {selectedAsset && (
-        <MediaAssetDetailsPanel
-          asset={selectedAsset}
-          campaigns={campaigns}
-          approvedPosts={approvedPosts}
-          onClose={() => setSelectedAssetId("")}
-          onUse={() => onUseMediaAsset(selectedAsset)}
-          onUpdate={updateAsset}
-          onDelete={() => deleteAsset(selectedAsset.id)}
-        />
-      )}
-    </div>
-  );
-}
-
-function MediaAssetCard({
-  asset,
-  onUse,
-  onViewDetails,
-  onDelete
-}: {
-  asset: MediaAsset;
-  onUse: () => void;
-  onViewDetails: () => void;
-  onDelete: () => void;
-}) {
-  return (
-    <Card className="overflow-hidden transition hover:-translate-y-0.5 hover:shadow-[0_18px_50px_rgba(15,23,42,0.1)]">
-      <MediaAssetPreview asset={asset} className="h-48" />
-      <div className="p-4">
-        <div className="min-w-0">
-          <h3 className="truncate text-base font-extrabold">{asset.filename}</h3>
-          <div className="mt-2 flex flex-wrap gap-2">
-            <Pill>{asset.mediaType}</Pill>
-            <Pill>{formatShortDate(asset.uploadedAt)}</Pill>
-            {(asset.tags ?? []).slice(0, 3).map((tag) => (
-              <Pill key={tag}>{tag}</Pill>
-            ))}
-          </div>
-        </div>
-
-        {asset.description && (
-          <p className="mt-3 truncate text-sm text-muted-foreground">
-            {asset.description}
-          </p>
-        )}
-
-        <div className="mt-4 grid grid-cols-2 gap-2">
-          <Button size="sm" onClick={onUse}>
-            Create post
-          </Button>
-          <Button size="sm" variant="secondary" onClick={onUse}>
-            Use in brief
-          </Button>
-          <Button size="sm" variant="secondary" onClick={onViewDetails}>
-            View details
-          </Button>
-          <Button size="sm" variant="danger" onClick={onDelete}>
-            Delete
-          </Button>
-        </div>
-      </div>
-    </Card>
-  );
-}
-
-function MediaAssetPreview({ asset, className }: { asset: MediaAsset; className?: string }) {
-  const src = asset.localPreviewUrl || asset.publicUrl || "";
-
-  if (src && asset.mediaType === "image") {
-    return (
-      // eslint-disable-next-line @next/next/no-img-element
-      <img
-        src={src}
-        alt={asset.altText || asset.filename}
-        className={cn("h-64 w-full object-cover", className)}
-      />
-    );
-  }
-
-  if (src && asset.mediaType === "video") {
-    return <video src={src} controls className={cn("h-64 w-full bg-black object-contain", className)} />;
-  }
-
-  if (src && asset.mediaType === "audio") {
-    return (
-      <div className={cn("flex h-40 flex-col justify-center bg-muted p-5", className)}>
-        <p className="mb-3 text-sm font-bold">{asset.filename}</p>
-        <audio src={src} controls className="w-full" />
-      </div>
-    );
-  }
-
-  return (
-    <div className={cn("flex h-48 items-center justify-center bg-muted p-6 text-center text-sm font-semibold text-muted-foreground", className)}>
-      Media preview unavailable after refresh.
-    </div>
-  );
-}
-
-function MediaAssetDetailsPanel({
-  asset,
-  campaigns,
-  approvedPosts,
-  onClose,
-  onUse,
-  onUpdate,
-  onDelete
-}: {
-  asset: MediaAsset;
-  campaigns: Campaign[];
-  approvedPosts: ApprovedPostMemory[];
-  onClose: () => void;
-  onUse: () => void;
-  onUpdate: (asset: MediaAsset) => Promise<void>;
-  onDelete: () => void;
-}) {
-  const [activeTab, setActiveTab] = useState<"Overview" | "AI Analysis" | "Usage" | "Settings">("Overview");
-  const [tagInput, setTagInput] = useState((asset.tags ?? []).join(", "));
-  const [notesInput, setNotesInput] = useState(asset.notes ?? "");
-  const [saveMessage, setSaveMessage] = useState("");
-  const [saveError, setSaveError] = useState("");
-  const campaignsUsingAsset = campaigns.filter((campaign) =>
-    campaign.mediaContext?.assetId === asset.id ||
-    (!campaign.mediaContext?.assetId && campaign.mediaContext?.filename === asset.filename)
-  );
-  const campaignIdsUsingAsset = new Set(campaignsUsingAsset.map((campaign) => campaign.id));
-  const approvedUsingAsset = approvedPosts.filter((post) =>
-    campaignIdsUsingAsset.has(post.campaignId)
-  );
-
-  useEffect(() => {
-    setTagInput((asset.tags ?? []).join(", "));
-    setNotesInput(asset.notes ?? "");
-    setSaveMessage("");
-    setSaveError("");
-  }, [asset.id, asset.notes, asset.tags]);
-
-  async function saveSettings() {
-    setSaveMessage("");
-    setSaveError("");
-    const nextAsset: MediaAsset = {
-      ...asset,
-      tags: tagInput
-        .split(",")
-        .map((tag) => tag.trim())
-        .filter(Boolean)
-        .slice(0, 12),
-      notes: notesInput.trim()
-    };
-
-    try {
-      await onUpdate(nextAsset);
-      setSaveMessage("Media settings saved.");
-    } catch (error) {
-      setSaveError(error instanceof Error ? error.message : "Could not save media settings.");
-    }
-  }
-
-  return (
-    <div className="fixed inset-0 z-50 flex justify-end bg-slate-950/30 p-3 backdrop-blur-sm">
-      <div className="flex h-full w-full max-w-3xl flex-col overflow-hidden rounded-lg border border-border bg-white shadow-xl">
-        <div className="flex items-start justify-between gap-3 border-b border-border p-5">
-          <div className="min-w-0">
-            <p className="text-xs font-bold uppercase text-primary">Media details</p>
-            <h3 className="mt-1 truncate text-xl font-bold">{asset.filename}</h3>
-          </div>
-          <Button variant="secondary" size="sm" onClick={onClose}>
-            Close
-          </Button>
-        </div>
-
-        <div className="border-b border-border px-5 py-3">
-          <div className="flex flex-wrap gap-2">
-            {(["Overview", "AI Analysis", "Usage", "Settings"] as const).map((tab) => (
-              <button
-                key={tab}
-                type="button"
-                onClick={() => setActiveTab(tab)}
-                className={cn(
-                  "rounded-md px-3 py-2 text-sm font-bold transition",
-                  activeTab === tab
-                    ? "bg-primary text-primary-foreground"
-                    : "bg-muted text-muted-foreground hover:text-foreground"
-                )}
-              >
-                {tab}
-              </button>
-            ))}
-          </div>
-        </div>
-
-        <div className="min-h-0 flex-1 overflow-y-auto p-5">
-          {activeTab === "Overview" && (
-            <div className="grid gap-5">
-              <MediaAssetPreview asset={asset} className="max-h-[420px] rounded-md object-contain" />
-              <div className="grid gap-3 md:grid-cols-2">
-                <BriefItem label="Filename" value={asset.filename} />
-                <BriefItem label="Type" value={`${asset.mediaType} · ${asset.fileType || "unknown"}`} />
-                <BriefItem label="Uploaded" value={formatShortDate(asset.uploadedAt)} />
-                <BriefItem label="Tags" value={(asset.tags ?? []).join(", ") || "No tags yet"} />
-              </div>
-              <AnalysisBlock label="Notes" value={asset.notes || "No notes yet."} />
-              <div className="flex flex-wrap gap-2">
-                <Button onClick={onUse}>Create post from this</Button>
-                <Button variant="secondary" onClick={onUse}>Use in brief</Button>
-              </div>
-            </div>
-          )}
-
-          {activeTab === "AI Analysis" && (
-            <div className="grid gap-3 md:grid-cols-2">
-              <AnalysisBlock
-                label="Visual description"
-                value={asset.description || "No AI description saved yet."}
-              />
-              <AnalysisBlock
-                label="Suggested content angles"
-                value={(asset.suggestedAngles ?? []).join("\n") || "No suggested angles yet."}
-              />
-              <AnalysisBlock
-                label="Suggested overlay text"
-                value={asset.overlayText || "No overlay text yet."}
-              />
-              <AnalysisBlock
-                label="Alt text"
-                value={asset.altText || "No alt text yet."}
-              />
-              <AnalysisBlock
-                label="AI/generated tags"
-                value={(asset.tags ?? []).join(", ") || "No tags yet."}
-              />
-              {(asset.sensitivityWarnings ?? []).length > 0 ? (
-                <div className="rounded-md border border-amber-200 bg-amber-50 p-3 text-sm font-semibold leading-6 text-amber-900">
-                  <p className="text-xs font-bold uppercase">Sensitivity warnings</p>
-                  <p className="mt-1">{(asset.sensitivityWarnings ?? []).join(", ")}</p>
-                </div>
-              ) : (
-                <AnalysisBlock label="Sensitivity warnings" value="No warnings saved." />
-              )}
-            </div>
-          )}
-
-          {activeTab === "Usage" && (
-            <div className="grid gap-4">
-              <div>
-                <p className="text-sm font-bold uppercase text-muted-foreground">Campaigns using this media</p>
-                <div className="mt-3 grid gap-2">
-                  {campaignsUsingAsset.length === 0 ? (
-                    <p className="rounded-md border border-dashed border-border bg-muted p-4 text-sm text-muted-foreground">
-                      No briefs are tracked with this media yet. Use this asset in Create Post to start tracking usage.
-                    </p>
-                  ) : (
-                    campaignsUsingAsset.map((campaign) => (
-                      <div key={campaign.id} className="rounded-md border border-border bg-muted p-3">
-                        <p className="font-semibold">{campaign.name}</p>
-                        <p className="mt-1 text-sm text-muted-foreground">
-                          {campaign.platforms.join(", ")} · {campaign.createdAt}
-                        </p>
-                      </div>
-                    ))
-                  )}
-                </div>
-              </div>
-
-              <div>
-                <p className="text-sm font-bold uppercase text-muted-foreground">Approved posts using this media</p>
-                <div className="mt-3 grid gap-2">
-                  {approvedUsingAsset.length === 0 ? (
-                    <p className="rounded-md border border-dashed border-border bg-muted p-4 text-sm text-muted-foreground">
-                      No approved posts are tracked with this media yet.
-                    </p>
-                  ) : (
-                    approvedUsingAsset.map((post) => (
-                      <div key={post.id} className="rounded-md border border-border bg-muted p-3">
-                        <p className="font-semibold">{post.platform}</p>
-                        <p className="mt-1 line-clamp-3 text-sm text-muted-foreground">
-                          {post.finalContent}
-                        </p>
-                      </div>
-                    ))
-                  )}
-                </div>
-              </div>
-            </div>
-          )}
-
-          {activeTab === "Settings" && (
-            <div className="grid gap-4">
-              <div>
-                <FieldLabel label="Tags" htmlFor={`media-tags-${asset.id}`} />
-                <input
-                  id={`media-tags-${asset.id}`}
-                  value={tagInput}
-                  onChange={(event) => setTagInput(event.target.value)}
-                  className="mt-2 h-10 w-full rounded-md border border-input bg-white px-3 text-sm outline-none focus:ring-2 focus:ring-ring"
-                  placeholder="factory, workshop, product"
-                />
-              </div>
-              <div>
-                <FieldLabel label="Notes" htmlFor={`media-notes-${asset.id}`} />
-                <textarea
-                  id={`media-notes-${asset.id}`}
-                  value={notesInput}
-                  onChange={(event) => setNotesInput(event.target.value)}
-                  className="mt-2 min-h-28 w-full rounded-md border border-input bg-white p-3 text-sm leading-6 outline-none focus:ring-2 focus:ring-ring"
-                  placeholder="What this media should be used for"
-                />
-              </div>
-              {saveMessage && <p className="text-sm font-semibold text-primary">{saveMessage}</p>}
-              {saveError && <p className="text-sm font-semibold text-red-700">{saveError}</p>}
-              <div className="flex flex-wrap justify-between gap-2">
-                <Button variant="danger" onClick={onDelete}>Delete asset</Button>
-                <Button onClick={saveSettings}>Save settings</Button>
-              </div>
-            </div>
-          )}
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function formatShortDate(value?: string) {
-  if (!value) return "Unknown date";
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return value;
-  return date.toLocaleDateString();
-}
-
-function formatShortDateTime(value?: string) {
-  if (!value) return "Unknown time";
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return value;
-  return date.toLocaleString([], {
-    month: "short",
-    day: "numeric",
-    hour: "numeric",
-    minute: "2-digit"
-  });
-}
-
-const emptyVoiceSourceForm = {
-  id: "",
-  name: "",
-  type: "Founder" as VoiceSourceType,
-  platform: "LinkedIn" as VoiceSourcePlatform,
-  purposes: ["Use for Voice"] as VoiceSourcePurpose[],
-  urls: "",
-  urlType: "Social Profile URL" as SourceUrlType,
-  syncStatus: "Manual Only" as SyncStatus,
-  lastChecked: "Never",
-  notes: "",
-  examples: ""
-};
-
-function VoiceSources({
-  voiceSources,
-  setVoiceSources,
-  selectedVoiceSourceId,
-  setSelectedVoiceSourceId,
-  importPosts,
-  setImportPosts
-}: {
-  voiceSources: VoiceSource[];
-  setVoiceSources: (sources: VoiceSource[]) => void;
-  selectedVoiceSourceId: string;
-  setSelectedVoiceSourceId: (id: string) => void;
-  importPosts: string;
-  setImportPosts: (value: string) => void;
-}) {
-  const [form, setForm] = useState(emptyVoiceSourceForm);
-  const [savedAt, setSavedAt] = useState("");
-  const isEditing = Boolean(form.id);
-
-  function updateForm<K extends keyof typeof emptyVoiceSourceForm>(
-    field: K,
-    value: (typeof emptyVoiceSourceForm)[K]
-  ) {
-    setForm((current) => ({ ...current, [field]: value }));
-  }
-
-  function resetForm() {
-    setForm(emptyVoiceSourceForm);
-  }
-
-  function saveSource() {
-    const sourceName = form.name.trim() || "Untitled Voice Source";
-    const sourceBase: Omit<VoiceSource, "analysis"> = {
-      id: form.id || `voice-${Date.now()}`,
-      name: sourceName,
-      type: form.type,
-      platform: form.platform,
-      purposes: form.purposes.length > 0 ? form.purposes : ["Use for Voice"],
-      urls: form.urls.trim(),
-      urlType: form.urlType,
-      syncStatus: form.syncStatus,
-      lastChecked: form.lastChecked.trim() || "Never",
-      notes: form.notes.trim(),
-      examples: form.examples.trim(),
-      updatedAt: new Intl.DateTimeFormat("en", {
-        month: "short",
-        day: "numeric"
-      }).format(new Date())
-    };
-    const nextSource: VoiceSource = {
-      ...sourceBase,
-      analysis: createVoiceAnalysis(sourceBase)
-    };
-    const nextSources = isEditing
-      ? voiceSources.map((source) =>
-          source.id === nextSource.id ? nextSource : source
-        )
-      : [nextSource, ...voiceSources];
-
-    setVoiceSources(nextSources);
-    setSelectedVoiceSourceId(nextSource.id);
-    setSavedAt(new Date().toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }));
-    resetForm();
-  }
-
-  function editSource(source: VoiceSource) {
-    setForm({
-      id: source.id,
-      name: source.name,
-      type: source.type,
-      platform: source.platform,
-      purposes: source.purposes ?? ["Use for Voice"],
-      urls: source.urls ?? "",
-      urlType: getUrlType(source),
-      syncStatus: getSyncStatus(source),
-      lastChecked: getLastChecked(source),
-      notes: source.notes ?? "",
-      examples: source.examples
-    });
-  }
-
-  function deleteSource(sourceId: string) {
-    const nextSources = voiceSources.filter((source) => source.id !== sourceId);
-    setVoiceSources(nextSources);
-    if (selectedVoiceSourceId === sourceId) {
-      setSelectedVoiceSourceId(nextSources[0]?.id ?? "");
-    }
-  }
-
-  return (
-    <div className="grid gap-5 xl:grid-cols-[420px_1fr]">
-      <Card className="p-5">
-        <div className="flex items-start justify-between gap-3">
-          <div>
-            <h3 className="text-lg font-bold">
-              {isEditing ? "Edit voice source" : "Add voice source"}
-            </h3>
-            <p className="mt-1 text-sm text-muted-foreground">
-              Use this for founder posts, company posts, social captions, and posts you like. These teach the system how to write.
-            </p>
-          </div>
-          {isEditing && (
-            <Button variant="ghost" size="sm" onClick={resetForm}>
-              Cancel
-            </Button>
-          )}
-        </div>
-
-        <div className="mt-5 grid gap-4">
-          <FieldLabel label="Source name" htmlFor="voice-source-name" />
-          <input
-            id="voice-source-name"
-            value={form.name}
-            onChange={(event) => updateForm("name", event.target.value)}
-            className="-mt-2 h-11 w-full rounded-md border border-input bg-white px-3 outline-none focus:ring-2 focus:ring-ring"
-            placeholder="Daniel Founder LinkedIn"
-          />
-          <p className="-mt-2 text-sm text-muted-foreground">
-            Name this by person, account, or voice. Put links in the URL field below.
-          </p>
-
-          <div className="grid gap-4 sm:grid-cols-2">
-            <div>
-              <FieldLabel label="Source type" htmlFor="voice-source-type" />
-              <select
-                id="voice-source-type"
-                value={form.type}
-                onChange={(event) =>
-                  updateForm("type", event.target.value as VoiceSourceType)
-                }
-                className="mt-2 h-11 w-full rounded-md border border-input bg-white px-3 outline-none focus:ring-2 focus:ring-ring"
-              >
-                {voiceSourceTypes.map((type) => (
-                  <option key={type} value={type}>
-                    {type}
-                  </option>
-                ))}
-              </select>
-            </div>
-            <div>
-              <FieldLabel label="Platform" htmlFor="voice-source-platform" />
-              <select
-                id="voice-source-platform"
-                value={form.platform}
-                onChange={(event) =>
-                  updateForm("platform", event.target.value as VoiceSourcePlatform)
-                }
-                className="mt-2 h-11 w-full rounded-md border border-input bg-white px-3 outline-none focus:ring-2 focus:ring-ring"
-              >
-                {voiceSourcePlatforms.map((platform) => (
-                  <option key={platform} value={platform}>
-                    {platform}
-                  </option>
-                ))}
-              </select>
-            </div>
-          </div>
-
-          <div>
-            <p className="text-sm font-semibold text-muted-foreground">Source purpose</p>
-            <div className="mt-3 grid gap-2 sm:grid-cols-3">
-              {voiceSourcePurposes.map((purpose) => (
-                <label
-                  key={purpose}
-                  className={cn(
-                    "flex items-center gap-2 rounded-md border p-3 text-sm font-semibold",
-                    form.purposes.includes(purpose)
-                      ? "border-primary bg-teal-50 text-primary"
-                      : "border-border bg-white text-muted-foreground"
-                  )}
-                >
-                  <input
-                    type="checkbox"
-                    checked={form.purposes.includes(purpose)}
-                    onChange={() =>
-                      updateForm(
-                        "purposes",
-                        form.purposes.includes(purpose)
-                          ? form.purposes.filter((item) => item !== purpose)
-                          : [...form.purposes, purpose]
-                      )
-                    }
-                    className="h-4 w-4 accent-teal-700"
-                  />
-                  {purpose}
-                </label>
-              ))}
-            </div>
-          </div>
-
-          <div>
-            <FieldLabel label="URLs" htmlFor="voice-source-urls" />
-            <textarea
-              id="voice-source-urls"
-              value={form.urls}
-              onChange={(event) => updateForm("urls", event.target.value)}
-              className="mt-2 min-h-24 w-full rounded-md border border-input bg-white p-4 text-sm leading-6 outline-none focus:ring-2 focus:ring-ring"
-              placeholder="Paste profile URLs, individual post URLs, or reference links."
-            />
-            <p className="mt-2 text-sm text-muted-foreground">
-              URLs are stored for reference only right now. The app does not fetch or sync them yet.
-            </p>
-          </div>
-
-          <div className="grid gap-4 sm:grid-cols-3">
-            <div>
-              <FieldLabel label="URL type" htmlFor="voice-url-type" />
-              <select
-                id="voice-url-type"
-                value={form.urlType}
-                onChange={(event) =>
-                  updateForm("urlType", event.target.value as SourceUrlType)
-                }
-                className="mt-2 h-11 w-full rounded-md border border-input bg-white px-3 outline-none focus:ring-2 focus:ring-ring"
-              >
-                {sourceUrlTypes.map((type) => (
-                  <option key={type} value={type}>
-                    {type}
-                  </option>
-                ))}
-              </select>
-            </div>
-            <div>
-              <FieldLabel label="Sync status" htmlFor="voice-sync-status" />
-              <select
-                id="voice-sync-status"
-                value={form.syncStatus}
-                onChange={(event) =>
-                  updateForm("syncStatus", event.target.value as SyncStatus)
-                }
-                className="mt-2 h-11 w-full rounded-md border border-input bg-white px-3 outline-none focus:ring-2 focus:ring-ring"
-              >
-                {syncStatuses.map((status) => (
-                  <option key={status} value={status}>
-                    {status}
-                  </option>
-                ))}
-              </select>
-            </div>
-            <div>
-              <FieldLabel label="Last checked" htmlFor="voice-last-checked" />
-              <input
-                id="voice-last-checked"
-                value={form.lastChecked}
-                onChange={(event) => updateForm("lastChecked", event.target.value)}
-                className="mt-2 h-11 w-full rounded-md border border-input bg-white px-3 outline-none focus:ring-2 focus:ring-ring"
-              />
-            </div>
-          </div>
-
-          <LearningNowBox />
-          <SyncReadinessBox message={voiceSyncReadinessMessage(form)} />
-
-          <div>
-            <FieldLabel label="Example posts" htmlFor="voice-source-examples" />
-            <textarea
-              id="voice-source-examples"
-              value={form.examples}
-              onChange={(event) => updateForm("examples", event.target.value)}
-              className="mt-2 min-h-[220px] w-full rounded-md border border-input bg-white p-4 text-sm leading-6 outline-none focus:ring-2 focus:ring-ring"
-              placeholder="Paste several posts, captions, hooks, or excerpts from this source..."
-            />
-          </div>
-
-          <div>
-            <FieldLabel label="Notes" htmlFor="voice-source-notes" />
-            <input
-              id="voice-source-notes"
-              value={form.notes}
-              onChange={(event) => updateForm("notes", event.target.value)}
-              className="mt-2 h-11 w-full rounded-md border border-input bg-white px-3 outline-none focus:ring-2 focus:ring-ring"
-              placeholder="Why this source matters or how to use it later"
-            />
-          </div>
-
-          <div className="rounded-md border border-dashed border-border bg-white p-4">
-            <div className="flex flex-col justify-between gap-3 sm:flex-row sm:items-center">
-              <div>
-                <p className="font-semibold">Import posts scratchpad</p>
-                <p className="mt-1 text-sm text-muted-foreground">
-                  Older pasted posts are kept here locally. Move useful examples into a saved voice source.
-                </p>
-              </div>
-              <Button
-                size="sm"
-                variant="secondary"
-                onClick={() =>
-                  updateForm(
-                    "examples",
-                    [form.examples, importPosts].filter(Boolean).join("\n\n")
-                  )
-                }
-              >
-                Add to examples
-              </Button>
-            </div>
-            <textarea
-              value={importPosts}
-              onChange={(event) => setImportPosts(event.target.value)}
-              className="mt-3 min-h-28 w-full rounded-md border border-input bg-white p-3 text-sm leading-6 outline-none focus:ring-2 focus:ring-ring"
-              placeholder="Paste posts here before turning them into a named voice source."
-            />
-          </div>
-
-          <div className="flex items-center justify-between gap-3">
-            {savedAt ? (
-              <span className="text-sm font-semibold text-primary">Saved {savedAt}</span>
-            ) : (
-              <span className="text-sm text-muted-foreground">
-                Stored locally in this browser.
-              </span>
-            )}
-            <Button onClick={saveSource}>
-              <Check size={16} /> Save source
-            </Button>
-          </div>
-        </div>
-      </Card>
-
-      <div className="grid gap-4">
-        {voiceSources.length === 0 ? (
-          <Card className="p-8 text-center">
-            <p className="font-semibold">No voice sources yet.</p>
-            <p className="mt-2 text-sm text-muted-foreground">
-              Add one to make post generation feel more specific.
-            </p>
-          </Card>
-        ) : (
-          voiceSources.map((source) => (
-            <VoiceSourceCard
-              key={source.id}
-              source={source}
-              isSelected={selectedVoiceSourceId === source.id}
-              onUse={() => setSelectedVoiceSourceId(source.id)}
-              onEdit={() => editSource(source)}
-              onDelete={() => deleteSource(source.id)}
-            />
-          ))
-        )}
-      </div>
-    </div>
-  );
-}
-
-function VoiceSourceCard({
-  source,
-  isSelected,
-  onUse,
-  onEdit,
-  onDelete
-}: {
-  source: VoiceSource;
-  isSelected: boolean;
-  onUse: () => void;
-  onEdit: () => void;
-  onDelete: () => void;
-}) {
-  return (
-    <Card className={cn("p-5", isSelected && "border-primary bg-teal-50/60")}>
-      <div className="flex flex-col justify-between gap-4 lg:flex-row lg:items-start">
-        <div>
-          <div className="flex flex-wrap items-center gap-2">
-            <h3 className="text-lg font-bold">{cleanVoiceSourceName(source.name)}</h3>
-            {isSelected && <Pill>Selected</Pill>}
-          </div>
-          {looksLikeUrl(source.name) && (
-            <p className="mt-2 text-sm font-semibold text-red-700">
-              This source name looks like a URL. Rename it so results stay clean.
-            </p>
-          )}
-          <div className="mt-2 flex flex-wrap gap-2">
-            <Pill>{source.type}</Pill>
-            <Pill>{source.platform}</Pill>
-            <Pill>{countUrls(source.urls ?? "")} URLs</Pill>
-            <Pill>{getUrlType(source)}</Pill>
-            <Pill>{getSyncStatus(source)}</Pill>
-            <Pill>Last checked: {getLastChecked(source)}</Pill>
-            {(source.purposes ?? ["Use for Voice"]).map((purpose) => (
-              <Pill key={purpose}>{purpose}</Pill>
-            ))}
-            <span className="text-xs font-semibold text-muted-foreground">
-              Updated {source.updatedAt}
-            </span>
-          </div>
-        </div>
-        <div className="flex flex-wrap gap-2">
-          <Button size="sm" variant="secondary" disabled>
-            Auto-sync posts
-          </Button>
-          <Button size="sm" variant={isSelected ? "primary" : "secondary"} onClick={onUse}>
-            Use
-          </Button>
-          <Button size="sm" variant="secondary" onClick={onEdit}>
-            Edit
-          </Button>
-          <Button size="sm" variant="danger" onClick={onDelete}>
-            Delete
-          </Button>
-        </div>
-      </div>
-
-      {source.notes && (
-        <p className="mt-3 text-sm text-muted-foreground">{source.notes}</p>
-      )}
-
-      <div className="mt-4 grid gap-3 lg:grid-cols-2">
-        <LearningNowBox />
-        <SyncReadinessBox message={voiceSyncReadinessMessage(source)} />
-      </div>
-
-      <div className="mt-5 grid gap-3 md:grid-cols-2">
-        <AnalysisBlock label="Tone" value={source.analysis.tone} />
-        <AnalysisBlock label="Common hooks" value={source.analysis.commonHooks} />
-        <AnalysisBlock label="Common phrases" value={source.analysis.commonPhrases} />
-        <AnalysisBlock label="Sentence style" value={source.analysis.sentenceStyle} />
-        <AnalysisBlock label="What to avoid" value={source.analysis.avoid} />
-        <AnalysisBlock label="Best use cases" value={source.analysis.bestUseCases} />
-      </div>
-    </Card>
-  );
-}
-
-function AnalysisBlock({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="rounded-md border border-border bg-white p-3">
-      <p className="text-xs font-bold uppercase text-muted-foreground">{label}</p>
-      <p className="mt-1 text-sm leading-6">{value}</p>
-    </div>
-  );
-}
-
-function LearningNowBox() {
-  return (
-    <div className="rounded-md border border-teal-200 bg-teal-50 p-4 text-sm leading-6 text-teal-900">
-      <p className="font-bold">How learning works right now</p>
-      <p className="mt-1">
-        Right now, the AI learns from pasted examples and pasted source content. URLs are stored as references only.
-      </p>
-    </div>
-  );
-}
-
-function SyncReadinessBox({
-  message,
-  buttonLabel = "Auto-sync posts"
-}: {
-  message: string;
-  buttonLabel?: string;
-}) {
-  return (
-    <div className="rounded-md border border-border bg-white p-4">
-      <p className="text-sm font-bold">Sync readiness</p>
-      <p className="mt-2 text-sm leading-6 text-muted-foreground">{message}</p>
-      <div className="mt-3 flex flex-col gap-2 sm:flex-row sm:items-center">
-        <Button size="sm" variant="secondary" disabled>
-          {buttonLabel}
-        </Button>
-        <span className="text-sm text-muted-foreground">
-          Coming later: connect account or API access to pull latest posts automatically.
-        </span>
-      </div>
-    </div>
-  );
-}
-
-function WarningBox({ children }: { children: React.ReactNode }) {
-  return (
-    <div className="rounded-md border border-amber-200 bg-amber-50/80 p-3 text-sm font-semibold leading-6 text-amber-900">
-      {children}
-    </div>
-  );
-}
-
-function SubtleNote({ children }: { children: React.ReactNode }) {
-  return (
-    <p className="mt-2 text-sm leading-6 text-slate-500">
-      {children}
-    </p>
-  );
-}
-
-function FieldLabel({ label, htmlFor }: { label: string; htmlFor: string }) {
-  return (
-    <label className="text-sm font-bold text-slate-600" htmlFor={htmlFor}>
-      {label}
-    </label>
-  );
-}
-
-function BrandRules({
-  uploadText,
-  brandVoice,
-  setBrandVoice,
-  persistBrandRules,
-  storageMode
-}: {
-  uploadText: string;
-  brandVoice: BrandVoiceProfile;
-  setBrandVoice: (profile: BrandVoiceProfile) => void;
-  persistBrandRules: (profile: BrandVoiceProfile) => void;
-  storageMode: StorageMode;
-}) {
-  const wordCount = uploadText.split(/\s+/).filter(Boolean).length;
-  const [savedAt, setSavedAt] = useState("");
-
-  function updateField(field: keyof BrandVoiceProfile, value: string) {
-    setBrandVoice({ ...brandVoice, [field]: value });
-  }
-
-  function handleSave() {
-    if (storageMode === "supabase") {
-      persistBrandRules(brandVoice);
-    } else {
-      writeLocalValue(storageKeys.brandVoice, brandVoice);
-    }
-    setSavedAt(new Date().toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }));
-  }
-
-  return (
-    <div className="grid gap-5 lg:grid-cols-3">
-      <Card className="p-5 lg:col-span-2">
-        <div className="flex flex-col justify-between gap-3 sm:flex-row sm:items-center">
-          <div>
-            <h3 className="text-lg font-bold">Brand Voice Rules</h3>
-            <p className="mt-1 text-sm text-muted-foreground">
-              Global writing rules that apply across all generated content.
-            </p>
-          </div>
-          <div className="flex items-center gap-3">
-            {savedAt && (
-              <span className="text-sm font-semibold text-primary">Saved {savedAt}</span>
-            )}
-            <Button size="sm" onClick={handleSave}>
-              Save profile
-            </Button>
-          </div>
-        </div>
-        <div className="mt-5 grid gap-4 md:grid-cols-2">
-          <VoiceField
-            id="voice-tone"
-            title="Tone"
-            value={brandVoice.tone}
-            onChange={(value) => updateField("tone", value)}
-          />
-          <VoiceField
-            id="voice-style"
-            title="Style"
-            value={brandVoice.style}
-            onChange={(value) => updateField("style", value)}
-          />
-          <VoiceField
-            id="voice-audience"
-            title="Audience"
-            value={brandVoice.audience}
-            onChange={(value) => updateField("audience", value)}
-          />
-          <VoiceField
-            id="voice-avoid"
-            title="Avoid"
-            value={brandVoice.avoid}
-            onChange={(value) => updateField("avoid", value)}
-          />
-        </div>
-      </Card>
-      <Card className="p-5">
-        <Sparkles className="text-primary" size={24} />
-        <h3 className="mt-4 text-lg font-bold">Mock confidence</h3>
-        <p className="mt-2 text-sm text-muted-foreground">
-          Based on pasted examples, this profile is ready for mock generation.
-        </p>
-        <div className="mt-5 h-3 overflow-hidden rounded-full bg-muted">
-          <div
-            className="h-full rounded-full bg-primary"
-            style={{ width: `${Math.min(95, 45 + wordCount)}%` }}
-          />
-        </div>
-        <p className="mt-3 text-sm font-semibold">{Math.min(95, 45 + wordCount)}% profile strength</p>
-      </Card>
-    </div>
-  );
-}
-
-function VoiceField({
-  id,
-  title,
-  value,
-  onChange
-}: {
-  id: string;
-  title: string;
-  value: string;
-  onChange: (value: string) => void;
-}) {
-  return (
-    <div className="rounded-md border border-border bg-white p-4">
-      <label className="font-semibold" htmlFor={id}>{title}</label>
-      <textarea
-        id={id}
-        value={value}
-        onChange={(event) => onChange(event.target.value)}
-        className="mt-3 min-h-24 w-full rounded-md border border-input bg-white p-3 text-sm leading-6 outline-none focus:ring-2 focus:ring-ring"
-      />
-    </div>
-  );
-}
-
-function RepurposeCampaign({
-  source,
-  campaigns,
-  profiles,
-  selectedProfileId,
-  setSelectedProfileId,
-  targetPlatforms,
-  setTargetPlatforms,
-  contentAngle,
-  setContentAngle,
-  intent,
-  setIntent,
-  librarySources,
-  selectedLibrarySourceIds,
-  setSelectedLibrarySourceIds,
-  reuseMedia,
-  setReuseMedia,
-  generationError,
-  generationNotice,
-  isGenerating,
-  setScreen,
-  setSource,
-  handleGenerate,
-  handleMockFallback
-}: {
-  source: RepurposeSource | null;
-  campaigns: Campaign[];
-  profiles: Profile[];
-  selectedProfileId: string;
-  setSelectedProfileId: (id: string) => void;
-  targetPlatforms: Platform[];
-  setTargetPlatforms: (platforms: Platform[]) => void;
-  contentAngle: ContentAngle | "";
-  setContentAngle: (angle: ContentAngle | "") => void;
-  intent: string;
-  setIntent: (value: string) => void;
-  librarySources: LibrarySource[];
-  selectedLibrarySourceIds: string[];
-  setSelectedLibrarySourceIds: (ids: string[]) => void;
-  reuseMedia: boolean;
-  setReuseMedia: (value: boolean) => void;
-  generationError: string;
-  generationNotice: string;
-  isGenerating: boolean;
-  setScreen: (screen: Screen) => void;
-  setSource: (source: RepurposeSource | null) => void;
-  handleGenerate: () => void;
-  handleMockFallback: () => void;
-}) {
-  const selectedLibrarySources = librarySources.filter((item) =>
-    selectedLibrarySourceIds.includes(item.id)
-  );
-
-  function toggleTargetPlatform(platform: Platform) {
-    setTargetPlatforms(
-      targetPlatforms.includes(platform)
-        ? targetPlatforms.filter((item) => item !== platform)
-        : [...targetPlatforms, platform]
-    );
-  }
-
-  function toggleLibrarySource(sourceId: string) {
-    setSelectedLibrarySourceIds(
-      selectedLibrarySourceIds.includes(sourceId)
-        ? selectedLibrarySourceIds.filter((id) => id !== sourceId)
-        : [...selectedLibrarySourceIds, sourceId]
-    );
-  }
-
-  function chooseSource(value: string) {
-    const [type, campaignId, postId] = value.split(":");
-    const campaign = campaigns.find((item) => item.id === campaignId);
-    if (!campaign) return;
-    if (type === "post") {
-      const post = campaign.posts.find((item) => item.id === postId);
-      if (!post) return;
-      setSource({
-        type: "post",
-        campaignId,
-        postId,
-        label: `${campaign.name} · ${post.platform}`,
-        content: userFacingPostContent(post.content, campaign, post),
-        mediaContext: campaign.mediaContext,
-        originalProfileId: campaign.profileId ?? post.profileId
-      });
-      return;
-    }
-    setSource({
-      type: "campaign",
-      campaignId,
-      label: campaign.name,
-      content: [
-        campaign.intent && `Intent: ${campaign.intent}`,
-        campaign.contentAngle && `Content angle: ${campaign.contentAngle}`,
-        campaign.idea && `Details: ${campaign.idea}`,
-        campaign.posts
-          .filter((post) => post.status === "approved")
-          .map((post) => `${post.platform}: ${userFacingPostContent(post.content, campaign, post)}`)
-          .join("\n\n")
-      ]
-        .filter(Boolean)
-        .join("\n\n"),
-      mediaContext: campaign.mediaContext,
-      originalProfileId: campaign.profileId
-    });
-  }
-
-  const sourceValue = source
-    ? `${source.type}:${source.campaignId}${source.postId ? `:${source.postId}` : ""}`
-    : "";
-  const generateBlocked =
-    !source ||
-    !selectedProfileId ||
-    targetPlatforms.length === 0 ||
-    !contentAngle ||
-    looksLikeGenericIntent(intent);
-
-  return (
-    <Card className="p-5">
-      <div className="mb-5 flex flex-col justify-between gap-3 md:flex-row md:items-start">
-        <div>
-          <p className="text-sm font-bold uppercase text-primary">Repurpose</p>
-          <h3 className="mt-1 text-2xl font-bold">Turn existing content into native drafts</h3>
-          <p className="mt-2 text-sm text-muted-foreground">
-            Preserve the core idea, then rewrite it for the target platforms.
-          </p>
-        </div>
-        <Button variant="secondary" onClick={() => setScreen("Dashboard")}>
-          Back to dashboard
-        </Button>
-      </div>
-
-      <div className="grid gap-5">
-        <div>
-          <FieldLabel label="Source post or brief" htmlFor="repurpose-source" />
-          <select
-            id="repurpose-source"
-            value={sourceValue}
-            onChange={(event) => chooseSource(event.target.value)}
-            className="mt-2 h-11 w-full rounded-md border border-input bg-white px-3 outline-none focus:ring-2 focus:ring-ring"
-          >
-            <option value="">Choose a source</option>
-            {campaigns.map((campaign) => (
-              <option key={`campaign-${campaign.id}`} value={`campaign:${campaign.id}`}>
-                Brief: {campaign.name}
-              </option>
-            ))}
-            {campaigns.flatMap((campaign) =>
-              campaign.posts
-                .filter((post) => post.status === "approved")
-                .map((post) => (
-                  <option key={post.id} value={`post:${campaign.id}:${post.id}`}>
-                    Approved post: {campaign.name} · {post.platform}
-                  </option>
-                ))
-            )}
+        <div className="mt-4 grid gap-3 md:grid-cols-[1fr_220px_140px]">
+          <input value={claimText} onChange={(event) => setClaimText(event.target.value)} className="h-10 rounded-md border border-input px-3 text-sm" placeholder="Add a claim Conduit can or cannot say" />
+          <select value={claimType} onChange={(event) => setClaimType(event.target.value as ClaimType)} className="h-10 rounded-md border border-input px-3 text-sm">
+            {(["Approved claim", "Needs review", "Do not say", "Customer-sensitive", "Proof-backed", "Internal only"] as ClaimType[]).map((type) => <option key={type} value={type}>{type}</option>)}
           </select>
-          {source && (
-            <div className="mt-3 rounded-md border border-border bg-muted p-4">
-              <div className="mb-2 flex flex-wrap gap-2">
-                <Pill>{source.type}</Pill>
-                <Pill>{source.label}</Pill>
-                {source.mediaContext && <Pill>Has original media context</Pill>}
-              </div>
-              <p className="line-clamp-5 whitespace-pre-wrap text-sm leading-6">
-                {source.content}
-              </p>
+          <Button onClick={addClaim}>Add claim</Button>
+        </div>
+        <div className="mt-4 grid gap-3">
+          {claimLibrary.length === 0 ? (
+            <div className="rounded-lg border border-dashed border-slate-200 p-5 text-sm text-muted-foreground">
+              No claims saved yet. Add approved, needs-review, and do-not-say claims to improve generation and safety checks.
             </div>
+          ) : (
+            claimLibrary.slice(0, 12).map((claim) => (
+              <div key={claim.id} className="flex flex-col justify-between gap-3 rounded-lg border border-slate-200 bg-white p-3 md:flex-row md:items-center">
+                <div>
+                  <div className="flex flex-wrap gap-2">
+                    <Pill>{claim.claimType}</Pill>
+                    <Pill>Risk: {claim.riskLevel}</Pill>
+                  </div>
+                  <p className="mt-2 text-sm font-semibold">{claim.claimText}</p>
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  <Button size="sm" variant="secondary" onClick={() => {
+                    const next = { ...claim, claimType: "Approved claim" as ClaimType, riskLevel: "Low" as ClaimRiskLevel, reviewedAt: new Date().toISOString(), updatedAt: new Date().toISOString() };
+                    setClaimLibrary((current) => current.map((item) => item.id === claim.id ? next : item));
+                    persistClaimLibraryItem(next);
+                  }}>Approve</Button>
+                  <Button size="sm" variant="secondary" onClick={() => {
+                    const next = { ...claim, claimType: "Needs review" as ClaimType, riskLevel: "Medium" as ClaimRiskLevel, updatedAt: new Date().toISOString() };
+                    setClaimLibrary((current) => current.map((item) => item.id === claim.id ? next : item));
+                    persistClaimLibraryItem(next);
+                  }}>Needs review</Button>
+                  <Button size="sm" variant="danger" onClick={() => removeClaimLibraryItem(claim.id)}>Delete</Button>
+                </div>
+              </div>
+            ))
           )}
         </div>
+      </Card>
 
-        <div className="grid gap-4 md:grid-cols-2">
-          <div>
-            <FieldLabel label="Profile to draft for" htmlFor="repurpose-profile" />
-            <select
-              id="repurpose-profile"
-              value={selectedProfileId}
-              onChange={(event) => setSelectedProfileId(event.target.value)}
-              className="mt-2 h-11 w-full rounded-md border border-input bg-white px-3 outline-none focus:ring-2 focus:ring-ring"
-            >
-              <option value="">Choose profile</option>
-              {profiles.map((profile) => (
-                <option key={profile.id} value={profile.id}>
-                  {profile.name} · {profile.type}
-                </option>
-              ))}
-            </select>
-          </div>
-          <div>
-            <FieldLabel label="Content angle" htmlFor="repurpose-angle" />
-            <select
-              id="repurpose-angle"
-              value={contentAngle}
-              onChange={(event) => setContentAngle(event.target.value as ContentAngle | "")}
-              className="mt-2 h-11 w-full rounded-md border border-input bg-white px-3 outline-none focus:ring-2 focus:ring-ring"
-            >
-              <option value="">Choose an angle</option>
-              {contentAngles.map((angle) => (
-                <option key={angle} value={angle}>{angle}</option>
-              ))}
-            </select>
-          </div>
-        </div>
-
-        <div>
-          <FieldLabel label="Intent / what should change" htmlFor="repurpose-intent" />
-          <textarea
-            id="repurpose-intent"
-            value={intent}
-            onChange={(event) => setIntent(event.target.value)}
-            className="mt-2 min-h-28 w-full rounded-md border border-input bg-white p-3 text-sm leading-6 outline-none focus:ring-2 focus:ring-ring"
-            placeholder="Example: Turn this approved LinkedIn post into concise X posts and a visual Instagram caption without copying it word-for-word."
-          />
-        </div>
-
-        <div>
-          <p className="text-sm font-semibold text-muted-foreground">Target platforms</p>
-          <div className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-            {platforms.map((platform) => (
-              <button
-                key={platform}
-                onClick={() => toggleTargetPlatform(platform)}
-                className={cn(
-                  "rounded-md border p-4 text-left font-semibold transition",
-                  targetPlatforms.includes(platform)
-                    ? "border-primary bg-teal-50 text-primary"
-                    : "border-border bg-white text-foreground hover:bg-muted"
-                )}
-              >
-                {platform}
-              </button>
-            ))}
-          </div>
-        </div>
-
-        {source?.mediaContext && (
-          <label className="flex items-start gap-3 rounded-md border border-border bg-white p-4 text-sm">
-            <input
-              type="checkbox"
-              checked={reuseMedia}
-              onChange={(event) => setReuseMedia(event.target.checked)}
-              className="mt-1"
-            />
-            <span>
-              <span className="font-semibold">Reuse original media context.</span>
-              <span className="mt-1 block text-muted-foreground">
-                The media file preview may still be session-only, but filename, notes, and image analysis can be reused.
-              </span>
-            </span>
-          </label>
-        )}
-
-        {librarySources.length > 0 && (
-          <div>
-            <p className="text-sm font-semibold text-muted-foreground">
-              Optional Company Knowledge
-            </p>
-            <div className="mt-3 grid gap-3 md:grid-cols-2">
-              {librarySources.map((sourceItem) => (
-                <button
-                  key={sourceItem.id}
-                  onClick={() => toggleLibrarySource(sourceItem.id)}
-                  className={cn(
-                    "rounded-md border p-4 text-left transition",
-                    selectedLibrarySourceIds.includes(sourceItem.id)
-                      ? "border-primary bg-teal-50 text-primary"
-                      : "border-border bg-white text-foreground hover:bg-muted"
-                  )}
-                >
-                  <p className="font-semibold">{sourceItem.name}</p>
-                  <p className="mt-1 text-sm text-muted-foreground">
-                    {sourceItem.category} · {sourceItem.platform}
-                  </p>
-                </button>
-              ))}
-            </div>
-            {selectedLibrarySources.length > 0 && (
-              <div className="mt-3 flex flex-wrap gap-2">
-                {selectedLibrarySources.map((item) => <Pill key={item.id}>{item.name}</Pill>)}
-              </div>
-            )}
-          </div>
-        )}
-
-        <div className="rounded-md border border-primary/20 bg-teal-50 p-4 text-sm leading-6 text-teal-900">
-          <p className="font-bold">Repurpose rules</p>
-          <p className="mt-1">
-            Do not copy the source word-for-word. Preserve the core idea and rewrite the format, length, tone, and media use for each target platform.
-          </p>
-        </div>
-
-        <div className="flex justify-end">
-          <Button onClick={handleGenerate} disabled={isGenerating || generateBlocked}>
-            <Sparkles size={16} /> {isGenerating ? "Repurposing..." : "Generate repurposed drafts"}
-          </Button>
-        </div>
-        {(generationError || generationNotice) && (
-          <div
-            className={cn(
-              "rounded-md border p-4 text-sm",
-              generationError
-                ? "border-red-200 bg-red-50 text-red-700"
-                : "border-teal-200 bg-teal-50 text-teal-800"
-            )}
-          >
-            <p className="font-semibold">
-              {generationError ? "Repurpose issue" : "Repurpose status"}
-            </p>
-            <p className="mt-1">{generationError || generationNotice}</p>
-            {generationError && (
-              <Button className="mt-3" size="sm" variant="secondary" onClick={handleMockFallback}>
-                Use mock fallback
-              </Button>
-            )}
-          </div>
-        )}
-      </div>
-    </Card>
-  );
-}
-
-function MediaLibraryPicker({
-  mediaAssets,
-  selectedMediaAssetId,
-  onSelect
-}: {
-  mediaAssets: MediaAsset[];
-  selectedMediaAssetId: string;
-  onSelect: (asset: MediaAsset) => void;
-}) {
-  if (mediaAssets.length === 0) {
-    return (
-      <div className="rounded-md border border-dashed border-border bg-muted p-3 text-sm text-muted-foreground">
-        No reusable media yet. Upload here for this post, or add reusable assets from Media Library.
-      </div>
-    );
-  }
-
-  return (
-    <div className="rounded-md border border-border bg-muted p-3">
-      <p className="text-xs font-bold uppercase text-muted-foreground">Select from Media Library</p>
-      <div className="mt-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
-        {mediaAssets.slice(0, 6).map((asset) => (
-          <button
-            key={asset.id}
-            type="button"
-            onClick={() => onSelect(asset)}
-            className={cn(
-              "rounded-md border bg-white p-3 text-left transition hover:border-primary",
-              selectedMediaAssetId === asset.id ? "border-primary ring-2 ring-primary/20" : "border-border"
-            )}
-          >
-            <div className="flex items-center justify-between gap-2">
-              <span className="truncate text-sm font-bold">{asset.filename}</span>
-              {selectedMediaAssetId === asset.id && <Pill>Selected</Pill>}
-            </div>
-            <p className="mt-1 text-xs text-muted-foreground">
-              {asset.mediaType} · {asset.tags?.slice(0, 2).join(", ") || "No tags"}
-            </p>
-          </button>
-        ))}
+      <div className="grid gap-4 md:grid-cols-3">
+        <LayerBlock title="Brain summary" description={brandVoice.tone || brandVoice.style || "Brand Voice Rules and Company Knowledge are active."} />
+        <LayerBlock title="Profiles connected" description={`${profiles.length} profiles can guide voice and inspiration.`} />
+        <LayerBlock title="Imported patterns" description={`${inspirationPatterns.length} legacy inspiration signals available as pattern-only context.`} />
       </div>
     </div>
   );
 }
 
-function NewCampaign({
-  campaignName,
-  setCampaignName,
-  campaignTemplate,
-  setCampaignTemplate,
-  contentAngle,
-  setContentAngle,
-  simpleStyleChips,
-  setSimpleStyleChips,
-  intent,
-  setIntent,
-  useApprovedPosts,
-  setUseApprovedPosts,
-  idea,
-  setIdea,
-  mediaContext,
-  setMediaContext,
-  mediaPreviewUrl,
-  mediaAssets,
-  selectedMediaAssetId,
-  applyMediaAsset,
-  handleMediaFile,
-  clearMedia,
-  brandVoice,
-  selectedPlatforms,
-  setSelectedPlatforms,
-  togglePlatform,
-  profiles,
-  selectedProfileId,
-  setSelectedProfileId,
-  selectedVoiceInfluenceIds,
-  setSelectedVoiceInfluenceIds,
-  selectedInspirationProfileIds,
-  setSelectedInspirationProfileIds,
-  librarySources,
-  selectedLibrarySourceIds,
-  setSelectedLibrarySourceIds,
-  generationError,
-  generationNotice,
-  isGenerating,
-  handleGenerate,
-  handleMockFallback,
-  createDefaultConduitProfile,
-  campaignComplete
-}: {
+function NewCampaign(props: {
   campaignName: string;
   setCampaignName: (value: string) => void;
   campaignTemplate: CampaignTemplate;
@@ -9754,7 +6037,7 @@ function NewCampaign({
   contentAngle: ContentAngle | "";
   setContentAngle: (value: ContentAngle | "") => void;
   simpleStyleChips: SimpleStyleChip[];
-  setSimpleStyleChips: (value: SimpleStyleChip[]) => void;
+  setSimpleStyleChips: (items: SimpleStyleChip[] | ((current: SimpleStyleChip[]) => SimpleStyleChip[])) => void;
   intent: string;
   setIntent: (value: string) => void;
   useApprovedPosts: boolean;
@@ -9762,12 +6045,12 @@ function NewCampaign({
   idea: string;
   setIdea: (value: string) => void;
   mediaContext: CampaignMediaContext;
-  setMediaContext: (context: CampaignMediaContext) => void;
+  setMediaContext: (value: CampaignMediaContext) => void;
   mediaPreviewUrl: string;
   mediaAssets: MediaAsset[];
   selectedMediaAssetId: string;
   applyMediaAsset: (asset: MediaAsset) => void;
-  handleMediaFile: (file?: File) => void;
+  handleMediaFile: (file: File) => void;
   clearMedia: () => void;
   brandVoice: BrandVoiceProfile;
   selectedPlatforms: Platform[];
@@ -9782,1774 +6065,1247 @@ function NewCampaign({
   setSelectedInspirationProfileIds: (ids: string[]) => void;
   librarySources: LibrarySource[];
   selectedLibrarySourceIds: string[];
-  setSelectedLibrarySourceIds: (ids: string[]) => void;
+  setSelectedLibrarySourceIds: (ids: string[] | ((current: string[]) => string[])) => void;
   generationError: string;
   generationNotice: string;
   isGenerating: boolean;
-  handleGenerate: () => void;
+  handleGenerate: () => Promise<void>;
+  handleCreateManualDraft: (input: {
+    sharedContent: string;
+    platformContent: Partial<Record<Platform, string>>;
+    platformSpecific: boolean;
+  }) => void;
   handleMockFallback: () => void;
   createDefaultConduitProfile: () => void;
   campaignComplete: boolean;
 }) {
+  const {
+    campaignName,
+    setCampaignName,
+    campaignTemplate,
+    setCampaignTemplate,
+    contentAngle,
+    setContentAngle,
+    simpleStyleChips,
+    setSimpleStyleChips,
+    intent,
+    setIntent,
+    useApprovedPosts,
+    setUseApprovedPosts,
+    idea,
+    setIdea,
+    mediaContext,
+    mediaPreviewUrl,
+    mediaAssets,
+    selectedMediaAssetId,
+    applyMediaAsset,
+    handleMediaFile,
+    clearMedia,
+    brandVoice,
+    selectedPlatforms,
+    togglePlatform,
+    profiles,
+    selectedProfileId,
+    setSelectedProfileId,
+    selectedVoiceInfluenceIds,
+    setSelectedVoiceInfluenceIds,
+    selectedInspirationProfileIds,
+    setSelectedInspirationProfileIds,
+    librarySources,
+    selectedLibrarySourceIds,
+    setSelectedLibrarySourceIds,
+    generationError,
+    generationNotice,
+    isGenerating,
+    handleGenerate,
+    handleCreateManualDraft,
+    handleMockFallback,
+    createDefaultConduitProfile,
+    campaignComplete
+  } = props;
+  const [manualDraft, setManualDraft] = useState("");
   const selectedProfile = profiles.find((profile) => profile.id === selectedProfileId);
-  const selectedTemplate = campaignTemplateConfigs[campaignTemplate];
-  const internalVoiceProfiles = profiles.filter(isInternalVoiceProfile);
-  const inspirationProfiles = profiles.filter(isInspirationProfile);
-  const selectedVoiceInfluences = profiles.filter((profile) =>
-    selectedVoiceInfluenceIds.includes(profile.id)
-  );
-  const selectedInspirationProfiles = profiles.filter((profile) =>
-    selectedInspirationProfileIds.includes(profile.id)
-  );
-  const [campaignMode, setCampaignMode] = useState<"simple" | "advanced">("simple");
-  const isAdvanced = campaignMode === "advanced";
-  const hasConduitProfile = profiles.some((profile) => profile.name.toLowerCase() === "conduit");
-  const mainPostIdea = intent;
-  const hasMainPostIdea = Boolean(mainPostIdea.trim()) && !looksLikeGenericIntent(mainPostIdea);
-  const activeSimpleStyleInstructions = simpleStyleOptions
-    .filter((style) => simpleStyleChips.includes(style.label))
-    .map((style) => style.instruction);
-  const selectedLibrarySources = selectedLibrarySourceIds.length > 0
-      ? librarySources.filter((source) => selectedLibrarySourceIds.includes(source.id))
-      : librarySources;
-  const warnings = genericLanguageWarnings([intent, idea, mediaContext.notes ?? "", campaignName]);
-  const qualityChecks = [
-    { label: "Posting Account selected", ok: Boolean(selectedProfileId) },
-    { label: "Content angle selected", ok: Boolean(contentAngle) },
-    { label: "Intent is specific", ok: !looksLikeGenericIntent(intent) },
-    {
-      label: "Media notes added if media exists",
-      ok: !mediaContext.filename || !looksLikeVagueMediaNotes(mediaContext.notes)
-    },
-    {
-      label:
-        selectedLibrarySources.length > 0
-          ? "Company Knowledge selected"
-          : "Company Knowledge skipped",
-      ok: true
-    },
-    {
-      label: "Brand Voice Rules present",
-      ok: Boolean(brandVoice.tone || brandVoice.style || brandVoice.audience || brandVoice.avoid)
-    }
-  ];
-  const generationBlocked =
-    !hasMainPostIdea ||
-    selectedPlatforms.length === 0;
-  const friendlyChecks = [
-    {
-      label: hasMainPostIdea ? "Ready" : "Needs main point",
-      ok: hasMainPostIdea
-    },
-    {
-      label: selectedPlatforms.length > 0 ? "Ready" : "Needs platform",
-      ok: selectedPlatforms.length > 0
-    },
-    {
-      label:
-        mediaContext.filename && looksLikeVagueMediaNotes(mediaContext.notes)
-          ? "Optional: Add media context"
-          : "Ready",
-      ok: true
-    }
-  ];
+  const conduitProfile = profiles.find((profile) => profile.name.toLowerCase().includes("conduit"));
 
-  useEffect(() => {
-    if (selectedProfileId) {
-      return;
-    }
-    const conduitProfile = profiles.find((profile) => profile.name.toLowerCase() === "conduit");
-    if (conduitProfile) {
-      setSelectedProfileId(conduitProfile.id);
-    }
-  }, [profiles, selectedProfileId, setSelectedProfileId]);
-
-  function toggleLibrarySource(sourceId: string) {
-    setSelectedLibrarySourceIds(
-      selectedLibrarySourceIds.includes(sourceId)
-        ? selectedLibrarySourceIds.filter((id) => id !== sourceId)
-        : [...selectedLibrarySourceIds, sourceId]
+  function toggleStyle(style: SimpleStyleChip) {
+    setSimpleStyleChips((current) =>
+      current.includes(style) ? current.filter((item) => item !== style) : [...current, style]
     );
   }
 
-  function toggleVoiceInfluence(profileId: string) {
-    setSelectedVoiceInfluenceIds(
-      selectedVoiceInfluenceIds.includes(profileId)
-        ? selectedVoiceInfluenceIds.filter((id) => id !== profileId)
-        : [...selectedVoiceInfluenceIds, profileId]
+  function toggleLibrarySource(id: string) {
+    setSelectedLibrarySourceIds((current) =>
+      current.includes(id) ? current.filter((item) => item !== id) : [...current, id]
     );
-  }
-
-  function toggleInspirationProfile(profileId: string) {
-    setSelectedInspirationProfileIds(
-      selectedInspirationProfileIds.includes(profileId)
-        ? selectedInspirationProfileIds.filter((id) => id !== profileId)
-        : [...selectedInspirationProfileIds, profileId]
-    );
-  }
-
-  function toggleSimpleStyle(style: SimpleStyleChip) {
-    if (style === "Conduit default") {
-      setSimpleStyleChips(["Conduit default"]);
-      return;
-    }
-
-    const withoutDefault = simpleStyleChips.filter((chip) => chip !== "Conduit default");
-    const next = withoutDefault.includes(style)
-      ? withoutDefault.filter((chip) => chip !== style)
-      : [...withoutDefault, style];
-    setSimpleStyleChips(next.length > 0 ? next : ["Conduit default"]);
-  }
-
-  function useTemplate() {
-    if (selectedTemplate.contentAngle) {
-      setContentAngle(selectedTemplate.contentAngle);
-    }
-
-    if (selectedPlatforms.length === 0) {
-      setSelectedPlatforms(selectedTemplate.recommendedPlatforms);
-    }
   }
 
   return (
-    <Card className="p-5">
-      <div className="grid gap-5">
+    <div className="space-y-5">
+      <Card className="p-6">
+        <p className="text-xs font-extrabold uppercase tracking-wide text-primary">Create Post</p>
+        <h2 className="mt-1 text-2xl font-extrabold tracking-tight">Build a Content Brief</h2>
+        <p className="mt-2 max-w-3xl text-sm leading-6 text-muted-foreground">
+          Turn a clear idea, source, opportunity, or media asset into platform-native drafts. Company Knowledge stays the truth layer.
+        </p>
         {campaignComplete && (
-          <div className="rounded-md border border-teal-200 bg-teal-50 p-4 text-sm leading-6 text-teal-900">
-            <p className="font-bold">Brief complete.</p>
-            <p className="mt-1">
-              This form is ready for the next post. Your previous brief remains saved in Content Library and Analytics.
-            </p>
+          <div className="mt-4 rounded-md border border-teal-200 bg-teal-50 p-3 text-sm font-semibold text-teal-900">
+            Previous brief is complete. This form is ready for a clean new post.
           </div>
         )}
-        <div className="flex flex-col justify-between gap-3 rounded-md border border-border bg-white p-4 sm:flex-row sm:items-center">
-          <div>
-            <p className="font-bold">Create Post</p>
-            <p className="mt-1 text-sm text-muted-foreground">
-              Start with the main point. The app will use Conduit knowledge and brand rules automatically.
-            </p>
+        {!selectedProfile && (
+          <div className="mt-4 flex flex-col justify-between gap-3 rounded-md border border-amber-200 bg-amber-50 p-4 md:flex-row md:items-center">
+            <p className="text-sm font-semibold text-amber-900">Create or load a Conduit profile before generating production posts.</p>
+            <Button size="sm" variant="secondary" onClick={createDefaultConduitProfile}>Create Conduit profile</Button>
           </div>
-          <div className="flex rounded-md border border-border bg-muted p-1">
-            {(["simple", "advanced"] as const).map((mode) => (
-              <button
-                key={mode}
-                onClick={() => setCampaignMode(mode)}
-                className={cn(
-                  "rounded px-3 py-1.5 text-sm font-bold capitalize transition",
-                  campaignMode === mode
-                    ? "bg-white text-foreground shadow-sm"
-                    : "text-muted-foreground hover:text-foreground"
-                )}
-              >
-                {mode}
-              </button>
-            ))}
-          </div>
+        )}
+      </Card>
+
+      <Card className="p-5">
+        <p className="text-xs font-extrabold uppercase tracking-wide text-primary">Step 1 · Main idea</p>
+        <div className="mt-4 grid gap-4">
+          <FieldLabel label="Brief title">
+            <input value={campaignName} onChange={(event) => setCampaignName(event.target.value)} className="mt-2 h-11 w-full rounded-md border border-input px-3 text-sm" placeholder="Factory-floor deployment update" />
+          </FieldLabel>
+          <FieldLabel label="What should this post communicate?">
+            <textarea value={idea} onChange={(event) => setIdea(event.target.value)} className="mt-2 min-h-32 w-full rounded-md border border-input p-3 text-sm" placeholder="Write the raw idea, source context, or point of view..." />
+          </FieldLabel>
+          <FieldLabel label="Intent">
+            <textarea value={intent} onChange={(event) => setIntent(event.target.value)} className="mt-2 min-h-20 w-full rounded-md border border-input p-3 text-sm" placeholder="What should the audience understand or do?" />
+          </FieldLabel>
         </div>
+      </Card>
 
-        {!isAdvanced && (
+      <Card className="p-5">
+        <p className="text-xs font-extrabold uppercase tracking-wide text-primary">Step 2 · Posting account / voice</p>
+        <div className="mt-4 grid gap-4 lg:grid-cols-3">
+          <FieldLabel label="Posting account">
+            <select value={selectedProfileId} onChange={(event) => setSelectedProfileId(event.target.value)} className="mt-2 h-11 w-full rounded-md border border-input px-3 text-sm">
+              <option value="">Select profile</option>
+              {profiles.map((profile) => <option key={profile.id} value={profile.id}>{profile.name} · {profile.type}</option>)}
+            </select>
+          </FieldLabel>
+          <FieldLabel label="Template">
+            <select value={campaignTemplate} onChange={(event) => setCampaignTemplate(event.target.value as CampaignTemplate)} className="mt-2 h-11 w-full rounded-md border border-input px-3 text-sm">
+              {Object.keys(campaignTemplateConfigs).map((template) => <option key={template} value={template}>{template}</option>)}
+            </select>
+          </FieldLabel>
+          <FieldLabel label="Content angle">
+            <select value={contentAngle} onChange={(event) => setContentAngle(event.target.value as ContentAngle | "")} className="mt-2 h-11 w-full rounded-md border border-input px-3 text-sm">
+              <option value="">Auto</option>
+              {(["Founder build-in-public", "Deployment win", "Company update", "Customer proof", "Product launch", "Behind the scenes", "Industry POV", "Technical explanation", "Recruiting", "Event recap", "Other"] as ContentAngle[]).map((angle) => <option key={angle} value={angle}>{angle}</option>)}
+            </select>
+          </FieldLabel>
+        </div>
+        <div className="mt-4 flex flex-wrap gap-2">
+          {simpleStyleOptions.map((style) => (
+            <button
+              key={style.label}
+              type="button"
+              onClick={() => toggleStyle(style.label)}
+              className={cn(
+                "rounded-md border px-3 py-2 text-sm font-bold",
+                simpleStyleChips.includes(style.label) ? "border-primary bg-primary text-primary-foreground" : "border-slate-200 bg-white text-slate-600"
+              )}
+            >
+              {style.label}
+            </button>
+          ))}
+        </div>
+        <div className="mt-4 grid gap-3 md:grid-cols-2">
+          <FieldLabel label="Internal voice influences">
+            <select
+              multiple
+              value={selectedVoiceInfluenceIds}
+              onChange={(event) => setSelectedVoiceInfluenceIds(Array.from(event.currentTarget.selectedOptions).map((option) => option.value))}
+              className="mt-2 min-h-24 w-full rounded-md border border-input px-3 py-2 text-sm"
+            >
+              {profiles.filter((profile) => profile.type !== "Inspiration / Reference" && profile.type !== "Competitor / Market Watch").map((profile) => <option key={profile.id} value={profile.id}>{profile.name}</option>)}
+            </select>
+          </FieldLabel>
+          <FieldLabel label="Pattern-only inspiration">
+            <select
+              multiple
+              value={selectedInspirationProfileIds}
+              onChange={(event) => setSelectedInspirationProfileIds(Array.from(event.currentTarget.selectedOptions).map((option) => option.value))}
+              className="mt-2 min-h-24 w-full rounded-md border border-input px-3 py-2 text-sm"
+            >
+              {profiles.filter((profile) => profile.type === "Inspiration / Reference" || profile.type === "Competitor / Market Watch").map((profile) => <option key={profile.id} value={profile.id}>{profile.name}</option>)}
+            </select>
+          </FieldLabel>
+        </div>
+        <p className="mt-3 text-sm text-muted-foreground">
+          {selectedProfile
+            ? `Posting as ${selectedProfile.name}. ${selectedProfile.personality.voiceTraits ? `Voice learned: ${selectedProfile.personality.voiceTraits}` : "No analyzed voice summary yet."}`
+            : conduitProfile
+              ? "Select the Conduit profile to use its saved voice."
+              : "No Conduit profile yet. Create one before production generation."}
+        </p>
+      </Card>
+
+      <Card className="p-5">
+        <p className="text-xs font-extrabold uppercase tracking-wide text-primary">Step 3 · Optional source, media, or context</p>
+        <div className="mt-4 grid gap-4 lg:grid-cols-[1fr_1fr]">
           <div>
-            <FieldLabel label="What should this post say?" htmlFor="main-post-idea" />
-            <textarea
-              id="main-post-idea"
-              value={mainPostIdea}
-              onChange={(event) => setIntent(event.target.value)}
-              className="mt-2 min-h-[220px] w-full rounded-md border border-input bg-white p-5 text-base leading-7 outline-none focus:ring-2 focus:ring-ring"
-              placeholder="Example: Show that Conduit is building close to hardware, factories, and real industrial operations."
-            />
-            {warnings.length > 0 && (
-              <SubtleNote>Replace generic language before generating: {warnings.join(", ")}.</SubtleNote>
-            )}
-          </div>
-        )}
-
-        {!isAdvanced && (
-          <div className="rounded-md border border-border bg-white p-4">
-            <p className="text-sm font-bold uppercase text-muted-foreground">Style</p>
-            <p className="mt-1 text-sm text-muted-foreground">
-              Pick a light direction for this draft. Advanced mode has full voice and inspiration controls.
-            </p>
-            <div className="mt-3 flex flex-wrap gap-2">
-              {simpleStyleOptions.map((style) => (
-                <button
-                  key={style.label}
-                  type="button"
-                  onClick={() => toggleSimpleStyle(style.label)}
-                  className={cn(
-                    "rounded-md border px-3 py-2 text-sm font-bold transition",
-                    simpleStyleChips.includes(style.label)
-                      ? "border-primary bg-teal-50 text-primary"
-                      : "border-border bg-muted text-muted-foreground hover:bg-white hover:text-foreground"
-                  )}
-                >
-                  {style.label}
-                </button>
-              ))}
-            </div>
-          </div>
-        )}
-
-        {!isAdvanced && (
-          <div className="rounded-md border border-border bg-white p-4">
-            <div className="flex flex-col justify-between gap-3 sm:flex-row sm:items-start">
-              <div>
-                <p className="text-sm font-bold uppercase text-muted-foreground">Upload media</p>
-                <p className="mt-2 text-sm leading-6 text-muted-foreground">
-                  Optional: add a photo, screenshot, video, or audio file, then give it a short note.
-                </p>
-              </div>
-              {(mediaContext.filename || mediaContext.notes) && (
-                <Button size="sm" variant="secondary" onClick={clearMedia}>
-                  Clear media
-                </Button>
+            <h3 className="font-bold">Company Knowledge</h3>
+            <p className="mt-1 text-sm text-muted-foreground">Select specific sources or leave empty to use all active Company Knowledge.</p>
+            <div className="mt-3 grid max-h-64 gap-2 overflow-auto rounded-lg border border-slate-200 bg-slate-50 p-3">
+              {librarySources.length === 0 ? (
+                <p className="text-sm text-muted-foreground">No Company Knowledge sources yet.</p>
+              ) : (
+                librarySources.map((source) => (
+                  <label key={source.id} className="flex items-start gap-2 rounded-md bg-white p-2 text-sm">
+                    <input type="checkbox" checked={selectedLibrarySourceIds.includes(source.id)} onChange={() => toggleLibrarySource(source.id)} className="mt-1" />
+                    <span>
+                      <span className="font-semibold">{getLibrarySourceDisplayName(source)}</span>
+                      <span className="block text-xs text-muted-foreground">{source.category} · {source.reviewStatus ?? "Needs review"}</span>
+                    </span>
+                  </label>
+                ))
               )}
             </div>
-            <div className="mt-4">
-              <MediaLibraryPicker
-                mediaAssets={mediaAssets}
-                selectedMediaAssetId={selectedMediaAssetId}
-                onSelect={applyMediaAsset}
-              />
-            </div>
-            <div className="mt-4 grid gap-4 lg:grid-cols-[1fr_1fr]">
-              <div>
-                <FieldLabel label="Upload media" htmlFor="campaign-media-simple" />
-                <input
-                  id="campaign-media-simple"
-                  type="file"
-                  accept={acceptedMediaTypes.join(",")}
-                  onChange={(event) => handleMediaFile(event.target.files?.[0])}
-                  className="mt-2 w-full rounded-md border border-input bg-white px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-ring"
-                />
-                {mediaContext.filename && (
-                  <div className="mt-3 flex flex-wrap gap-2">
-                    <Pill>{mediaContext.filename}</Pill>
-                    <Pill>{mediaContext.type ?? "media"}</Pill>
-                  </div>
-                )}
-              </div>
-              <div>
-                <FieldLabel label="Short media/context note" htmlFor="campaign-media-notes-simple" />
-                <textarea
-                  id="campaign-media-notes-simple"
-                  value={mediaContext.notes ?? ""}
-                  onChange={(event) =>
-                    setMediaContext({
-                      ...mediaContext,
-                      notes: event.target.value
-                    })
-                  }
-                  className="mt-2 min-h-28 w-full rounded-md border border-input bg-white p-3 text-sm leading-6 outline-none focus:ring-2 focus:ring-ring"
-                  placeholder="What happened? Why does it matter? What should the post focus on?"
-                />
-              </div>
-            </div>
-            {mediaPreviewUrl && (
-              <div className="mt-4 overflow-hidden rounded-md border border-border bg-muted p-3">
-                {mediaContext.type === "image" && (
-                  // eslint-disable-next-line @next/next/no-img-element
-                  <img
-                    src={mediaPreviewUrl}
-                    alt={mediaContext.filename ?? "Uploaded media preview"}
-                    className="max-h-80 w-full rounded-md object-contain"
-                  />
-                )}
-                {mediaContext.type === "video" && (
-                  <video src={mediaPreviewUrl} controls className="max-h-80 w-full rounded-md bg-black" />
-                )}
-                {mediaContext.type === "audio" && (
-                  <div className="rounded-md bg-white p-4">
-                    <p className="mb-3 text-sm font-semibold">{mediaContext.filename}</p>
-                    <audio src={mediaPreviewUrl} controls className="w-full" />
-                  </div>
-                )}
-              </div>
-            )}
           </div>
-        )}
-
-        {isAdvanced && <div className="rounded-md border border-primary/20 bg-teal-50 p-4">
-          <div className="flex flex-col justify-between gap-3 md:flex-row md:items-start">
-            <div className="min-w-0 flex-1">
-              <FieldLabel label="Content template" htmlFor="campaign-template" />
-              <p className="mt-1 text-sm leading-6 text-muted-foreground">
-                Start from a repeatable brief structure, then fill in your own specific intent and details.
-              </p>
-              <select
-                id="campaign-template"
-                value={campaignTemplate}
-                onChange={(event) => setCampaignTemplate(event.target.value as CampaignTemplate)}
-                className="mt-3 h-11 w-full rounded-md border border-input bg-white px-3 outline-none focus:ring-2 focus:ring-ring"
-              >
-                {Object.keys(campaignTemplateConfigs).map((template) => (
-                  <option key={template} value={template}>
-                    {template}
-                  </option>
-                ))}
-              </select>
+          <div>
+            <h3 className="font-bold">Media</h3>
+            <div className="mt-3 rounded-lg border border-slate-200 bg-slate-50 p-4">
+              {mediaPreviewUrl ? (
+                <div className="space-y-3">
+                  <img src={mediaPreviewUrl} alt={mediaContext.filename || "Selected media"} className="max-h-64 w-full rounded-md object-contain" />
+                  <p className="text-sm font-semibold">{mediaContext.assetName || mediaContext.filename}</p>
+                  <Button size="sm" variant="secondary" onClick={clearMedia}>Remove media</Button>
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  <p className="text-sm text-muted-foreground">Attach media to ground captions in what is visible.</p>
+                  <input
+                    type="file"
+                    accept="image/*,video/*,audio/*"
+                    onChange={(event) => {
+                      const file = event.target.files?.[0];
+                      if (file) handleMediaFile(file);
+                    }}
+                    className="text-sm"
+                  />
+                  {mediaAssets.length > 0 && (
+                    <select
+                      value={selectedMediaAssetId}
+                      onChange={(event) => {
+                        const asset = mediaAssets.find((item) => item.id === event.target.value);
+                        if (asset) applyMediaAsset(asset);
+                      }}
+                      className="h-10 w-full rounded-md border border-input px-3 text-sm"
+                    >
+                      <option value="">Select from Media Library</option>
+                      {mediaAssets.map((asset) => <option key={asset.id} value={asset.id}>{asset.filename}</option>)}
+                    </select>
+                  )}
+                </div>
+              )}
             </div>
-            <Button className="md:mt-8" variant="secondary" onClick={useTemplate}>
-              Use this template
+          </div>
+        </div>
+        <label className="mt-4 flex items-center gap-2 text-sm font-semibold">
+          <input type="checkbox" checked={useApprovedPosts} onChange={(event) => setUseApprovedPosts(event.target.checked)} />
+          Use approved examples and Feedback Memory when available
+        </label>
+        <p className="mt-2 text-sm text-muted-foreground">{brandVoice.tone || brandVoice.style || "Brand Voice Rules are active for generated posts."}</p>
+      </Card>
+
+      <Card className="p-5">
+        <p className="text-xs font-extrabold uppercase tracking-wide text-primary">Step 4 · Platforms</p>
+        <div className="mt-4 grid gap-3 md:grid-cols-4">
+          {platforms.map((platform) => (
+            <button
+              key={platform}
+              type="button"
+              onClick={() => togglePlatform(platform)}
+              className={cn(
+                "rounded-lg border px-4 py-5 text-left font-bold transition",
+                selectedPlatforms.includes(platform) ? "border-primary bg-primary/10 text-primary" : "border-slate-200 bg-white text-slate-950"
+              )}
+            >
+              {platform}
+            </button>
+          ))}
+        </div>
+      </Card>
+
+      <Card className="p-5">
+        <div className="flex flex-col justify-between gap-4 lg:flex-row lg:items-center">
+          <div>
+            <p className="text-xs font-extrabold uppercase tracking-wide text-primary">Step 5 · Generate</p>
+            <h3 className="mt-1 text-lg font-bold">Ready when the brief is clear.</h3>
+            <p className="mt-1 text-sm text-muted-foreground">If OpenAI is unavailable, use mock fallback to keep reviewing the workflow.</p>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <Button
+              variant="secondary"
+              onClick={() => handleCreateManualDraft({
+                sharedContent: manualDraft,
+                platformContent: {},
+                platformSpecific: false
+              })}
+              disabled={!manualDraft.trim()}
+            >
+              Save manual draft
+            </Button>
+            <Button variant="secondary" onClick={handleMockFallback} disabled={isGenerating}>Use mock fallback</Button>
+            <Button onClick={() => void handleGenerate()} disabled={isGenerating}>
+              <Sparkles size={16} /> {isGenerating ? "Generating..." : "Generate"}
             </Button>
           </div>
-          <div className="mt-4 flex flex-wrap gap-2">
-            <Pill>
-              Suggested angle: {selectedTemplate.contentAngle || "Choose your own"}
-            </Pill>
-            <Pill>
-              Recommended: {selectedTemplate.recommendedPlatforms.join(", ")}
-            </Pill>
-          </div>
-          <div className="mt-4 rounded-md border border-border bg-white p-4">
-            <p className="text-sm font-bold uppercase text-muted-foreground">
-              Helper questions
-            </p>
-            <div className="mt-3 grid gap-2 md:grid-cols-2">
-              {selectedTemplate.helperQuestions.map((question) => (
-                <div key={question} className="rounded-md bg-muted px-3 py-2 text-sm">
-                  {question}
-                </div>
-              ))}
-            </div>
-          </div>
-        </div>}
-
-        <div>
-          <label className="text-sm font-semibold text-muted-foreground" htmlFor="campaign-profile">
-            Posting Account
-          </label>
-          <p className="mt-1 text-sm text-muted-foreground">
-            Who this post is for or being posted as. Conduit is the primary default.
-          </p>
-          <select
-            id="campaign-profile"
-            value={selectedProfileId}
-            onChange={(event) => setSelectedProfileId(event.target.value)}
-            className="mt-2 h-11 w-full rounded-md border border-input bg-white px-3 outline-none focus:ring-2 focus:ring-ring"
-          >
-            <option value="">No saved profile selected</option>
-            {profiles.map((profile) => (
-              <option key={profile.id} value={profile.id}>
-                {profile.name} · {profile.type}
-              </option>
-            ))}
-          </select>
-          {selectedProfile ? (
-            <div className="mt-3 rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
-              <div className="flex flex-wrap gap-2">
-                <Pill>{selectedProfile.type}</Pill>
-                {selectedProfile.role && <Pill>{selectedProfile.role}</Pill>}
-                {isAdvanced && <Pill>{countProfileUrls(selectedProfile)} URLs</Pill>}
-                {isAdvanced && <Pill>{selectedProfile.syncStatus}</Pill>}
-                {isAdvanced && <Pill>Last checked: {selectedProfile.lastChecked}</Pill>}
-                {isAdvanced && <Pill>{countWords(selectedProfile.examples)} words pasted</Pill>}
-              </div>
-              {selectedProfile.bio && (
-                <p className="mt-3 text-sm leading-6 text-muted-foreground">{selectedProfile.bio}</p>
-              )}
-              {isAdvanced && countProfileUrls(selectedProfile) > 0 && !selectedProfile.examples.trim() && (
-                <SubtleNote>URLs saved. Add examples later to improve voice.</SubtleNote>
-              )}
-              {isAdvanced && selectedProfile.examples.trim() && (
-                <SubtleNote>Ready for generation.</SubtleNote>
-              )}
-              {!isAdvanced && (
-                <SubtleNote>Using Conduit Company Knowledge automatically.</SubtleNote>
-              )}
-            </div>
-          ) : (
-            <div className="mt-3 rounded-lg border border-dashed border-slate-300 bg-white p-4 text-sm text-muted-foreground shadow-sm">
-              <p>Create a Profile to draft as Conduit, a founder, team member, company, or team. Generation can still run with the general brand voice.</p>
-              {!hasConduitProfile && (
-                <Button className="mt-3" size="sm" onClick={createDefaultConduitProfile}>
-                  Create default Conduit profile
-                </Button>
-              )}
-            </div>
-          )}
         </div>
-
-        {isAdvanced && <div>
-          <p className="text-sm font-semibold text-muted-foreground">Voice Influence</p>
-          <p className="mt-1 text-sm text-muted-foreground">
-            Internal voices that help the post sound like us. These shape cadence and clarity, but the Posting Account still determines who is speaking.
-          </p>
-          {internalVoiceProfiles.length === 0 ? (
-            <div className="mt-3 rounded-md border border-dashed border-border bg-white p-4 text-sm text-muted-foreground">
-              Add Conduit, founder, team, or internal voice profiles to influence style.
-            </div>
-          ) : (
-            <div className="mt-3 grid gap-3 md:grid-cols-2">
-              {internalVoiceProfiles.map((profile) => (
-                <button
-                  key={profile.id}
-                  onClick={() => toggleVoiceInfluence(profile.id)}
-                  className={cn(
-                    "rounded-lg border p-4 text-left shadow-sm transition",
-                    selectedVoiceInfluenceIds.includes(profile.id)
-                      ? "border-primary bg-teal-50 text-primary"
-                      : "border-slate-200 bg-white text-foreground hover:border-slate-300 hover:bg-slate-50"
-                  )}
-                >
-                  <p className="font-semibold">{profile.name}</p>
-                  <p className="mt-1 text-sm text-muted-foreground">
-                    {profile.type} · {profile.role || "Voice source"} · {countWords(profile.examples)} words
-                  </p>
-                </button>
-              ))}
-            </div>
-          )}
-          {selectedVoiceInfluences.length > 0 && (
-            <div className="mt-3 flex flex-wrap gap-2">
-              {selectedVoiceInfluences.map((profile) => (
-                <Pill key={profile.id}>{profile.name}</Pill>
-              ))}
-            </div>
-          )}
-        </div>
-        }
-
-        {isAdvanced && <div>
-          <p className="text-sm font-semibold text-muted-foreground">Inspiration / Reference Profiles</p>
-          <p className="mt-1 text-sm text-muted-foreground">
-            External examples that can inspire format or style, without copying. These never override Conduit facts, Company Knowledge, or Brand Voice Rules.
-          </p>
-          {inspirationProfiles.length === 0 ? (
-            <div className="mt-3 rounded-md border border-dashed border-border bg-white p-4 text-sm text-muted-foreground">
-              Add Inspiration / Reference profiles for external creative patterns you like.
-            </div>
-          ) : (
-            <div className="mt-3 grid gap-3 md:grid-cols-2">
-              {inspirationProfiles.map((profile) => (
-                <button
-                  key={profile.id}
-                  onClick={() => toggleInspirationProfile(profile.id)}
-                  className={cn(
-                    "rounded-lg border p-4 text-left shadow-sm transition",
-                    selectedInspirationProfileIds.includes(profile.id)
-                      ? "border-primary bg-teal-50 text-primary"
-                      : "border-slate-200 bg-white text-foreground hover:border-slate-300 hover:bg-slate-50"
-                  )}
-                >
-                  <p className="font-semibold">{profile.name}</p>
-                  <p className="mt-1 text-sm text-muted-foreground">
-                    {profile.type} · learn patterns only
-                  </p>
-                </button>
-              ))}
-            </div>
-          )}
-          {selectedInspirationProfiles.length > 0 && (
-            <div className="mt-3 flex flex-wrap gap-2">
-              {selectedInspirationProfiles.map((profile) => (
-                <Pill key={profile.id}>{profile.name}</Pill>
-              ))}
-            </div>
-          )}
-        </div>
-        }
-
-        <div>
-          <p className="text-sm font-semibold text-muted-foreground">Platforms</p>
-          <div className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-            {platforms.map((platform) => (
-              <button
-                key={platform}
-                onClick={() => togglePlatform(platform)}
-                className={cn(
-                  "rounded-lg border p-4 text-left font-semibold shadow-sm transition",
-                  selectedPlatforms.includes(platform)
-                    ? "border-primary bg-teal-50 text-primary"
-                    : "border-slate-200 bg-white text-foreground hover:border-slate-300 hover:bg-slate-50"
-                )}
-              >
-                {platform}
-              </button>
-            ))}
-          </div>
-        </div>
-
-        {isAdvanced && <div>
-          <label className="text-sm font-semibold text-muted-foreground" htmlFor="campaign-name">
-            Brief title
-          </label>
-          <input
-            id="campaign-name"
-            value={campaignName}
-            onChange={(event) => setCampaignName(event.target.value)}
-            className="mt-2 h-11 w-full rounded-md border border-input bg-white px-3 outline-none focus:ring-2 focus:ring-ring"
-          />
-        </div>}
-
-        {isAdvanced && <div className="grid gap-4 lg:grid-cols-2">
-          <div>
-            <FieldLabel label="Content angle" htmlFor="content-angle" />
-            <select
-              id="content-angle"
-              value={contentAngle}
-              onChange={(event) => setContentAngle(event.target.value as ContentAngle | "")}
-              className="mt-2 h-11 w-full rounded-md border border-input bg-white px-3 outline-none focus:ring-2 focus:ring-ring"
-            >
-              <option value="">Choose an angle</option>
-              {contentAngles.map((angle) => (
-                <option key={angle} value={angle}>
-                  {angle}
-                </option>
-              ))}
-            </select>
-          </div>
-          <div>
-            <FieldLabel label="What should this post communicate?" htmlFor="campaign-intent" />
-            <textarea
-              id="campaign-intent"
-              value={intent}
-              onChange={(event) => setIntent(event.target.value)}
-              className="mt-2 min-h-28 w-full rounded-md border border-input bg-white p-3 text-sm leading-6 outline-none focus:ring-2 focus:ring-ring"
-              placeholder={selectedTemplate.intentPlaceholder}
-            />
-          </div>
-        </div>}
-
-        {isAdvanced && <label className="flex items-start gap-3 rounded-md border border-border bg-white p-4 text-sm">
-          <input
-            type="checkbox"
-            checked={useApprovedPosts}
-            onChange={(event) => setUseApprovedPosts(event.target.checked)}
-            className="mt-1"
-          />
-          <span>
-            <span className="font-semibold">Use approved posts to improve future drafts.</span>
-            <span className="mt-1 block text-muted-foreground">
-              The generator will use 3 to 5 recent approved posts from the selected Profile as style examples.
-            </span>
-          </span>
-        </label>}
-
-        {isAdvanced && <div>
-          <FieldLabel label="Details / raw notes" htmlFor="idea" />
-          <textarea
-            id="idea"
-            value={idea}
-            onChange={(event) => setIdea(event.target.value)}
-            className="mt-2 min-h-[180px] w-full rounded-md border border-input bg-white p-4 leading-6 outline-none focus:ring-2 focus:ring-ring"
-            placeholder={selectedTemplate.detailsPlaceholder}
-          />
-          <p className="mt-2 text-sm text-muted-foreground">
-            Intent drives the output. Details give the AI concrete raw material to work with. Use the template questions above as prompts, not as copy to paste.
-          </p>
-          {warnings.length > 0 && (
-            <div className="mt-3 rounded-md border border-amber-200 bg-amber-50 p-3 text-sm font-semibold text-amber-900">
-              Replace generic language before generating: {warnings.join(", ")}.
-            </div>
-          )}
-        </div>}
-
-        {isAdvanced && <div className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
-          <div className="flex flex-col justify-between gap-3 sm:flex-row sm:items-start">
-            <div>
-              <p className="text-sm font-bold uppercase text-muted-foreground">Media</p>
-              <p className="mt-2 text-sm leading-6 text-muted-foreground">
-                Upload a photo, screenshot, video, or audio file. Images can be analyzed by AI now. Video/audio transcription can be added later.
-              </p>
-              {isAdvanced && <p className="mt-1 text-sm leading-6 text-muted-foreground">
-                Media preview uses a temporary object URL and is not persisted after refresh yet. Filename, type, notes, and analysis save with the brief.
-              </p>}
-            </div>
-            {(mediaContext.filename || mediaContext.notes) && (
-              <Button size="sm" variant="secondary" onClick={clearMedia}>
-                Clear media
-              </Button>
-            )}
-          </div>
-
-          <div className="mt-4">
-            <MediaLibraryPicker
-              mediaAssets={mediaAssets}
-              selectedMediaAssetId={selectedMediaAssetId}
-              onSelect={applyMediaAsset}
-            />
-          </div>
-
-          <div className="mt-4 grid gap-4 lg:grid-cols-[1fr_1fr]">
-            <div>
-              <FieldLabel label="Upload media" htmlFor="campaign-media" />
-              <input
-                id="campaign-media"
-                type="file"
-                accept={acceptedMediaTypes.join(",")}
-                onChange={(event) => handleMediaFile(event.target.files?.[0])}
-                className="mt-2 w-full rounded-md border border-input bg-white px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-ring"
-              />
-              {mediaContext.filename && (
-                <div className="mt-3 flex flex-wrap gap-2">
-                  <Pill>{mediaContext.filename}</Pill>
-                  <Pill>{mediaContext.type ?? "media"}</Pill>
-                  <Pill>Session preview only</Pill>
-                </div>
-              )}
-            </div>
-
-            <div>
-              <FieldLabel label={isAdvanced ? "Manual media notes/context" : "Short media/context note"} htmlFor="campaign-media-notes" />
-              <textarea
-                id="campaign-media-notes"
-                value={mediaContext.notes ?? ""}
-                onChange={(event) =>
-                  setMediaContext({
-                    ...mediaContext,
-                    notes: event.target.value
-                  })
-                }
-                className="mt-2 min-h-28 w-full rounded-md border border-input bg-white p-3 text-sm leading-6 outline-none focus:ring-2 focus:ring-ring"
-                placeholder={selectedTemplate.mediaNotesPlaceholder}
-              />
-              {mediaContext.filename && looksLikeVagueMediaNotes(mediaContext.notes) && (
-                <SubtleNote>Add what happened, why it matters, and what angle you want.</SubtleNote>
-              )}
-            </div>
-          </div>
-
-          {mediaPreviewUrl && (
-            <div className="mt-4 overflow-hidden rounded-lg border border-slate-200 bg-slate-50 p-3 shadow-inner">
-              {mediaContext.type === "image" && (
-                // eslint-disable-next-line @next/next/no-img-element
-                <img
-                  src={mediaPreviewUrl}
-                  alt={mediaContext.filename ?? "Uploaded media preview"}
-                  className="max-h-80 w-full rounded-md object-contain"
-                />
-              )}
-              {mediaContext.type === "video" && (
-                <video
-                  src={mediaPreviewUrl}
-                  controls
-                  className="max-h-80 w-full rounded-md bg-black"
-                />
-              )}
-              {mediaContext.type === "audio" && (
-                <div className="rounded-md bg-white p-4">
-                  <p className="mb-3 text-sm font-semibold">{mediaContext.filename}</p>
-                  <audio src={mediaPreviewUrl} controls className="w-full" />
-                </div>
-              )}
-            </div>
-          )}
-        </div>}
-
-        {isAdvanced && <div>
-          <div className="flex flex-col justify-between gap-2 sm:flex-row sm:items-center">
-            <p className="text-sm font-semibold text-muted-foreground">
-              Company Knowledge: optional supporting context
-            </p>
-            <span className="text-sm text-muted-foreground">
-              {selectedLibrarySources.length} selected
-            </span>
-          </div>
-          {librarySources.length === 0 ? (
-            <div className="mt-3 rounded-md border border-dashed border-border bg-white p-4 text-sm text-muted-foreground">
-              Add Company Knowledge items to ground generation with saved links and pasted content.
-            </div>
-          ) : (
-            <div className="mt-3 grid gap-3 md:grid-cols-2">
-              {librarySources.map((source) => (
-                <button
-                  key={source.id}
-                  onClick={() => toggleLibrarySource(source.id)}
-                  className={cn(
-                    "rounded-lg border p-4 text-left shadow-sm transition",
-                    selectedLibrarySourceIds.includes(source.id)
-                      ? "border-primary bg-teal-50 text-primary"
-                      : "border-slate-200 bg-white text-foreground hover:border-slate-300 hover:bg-slate-50"
-                  )}
-                >
-                  <p className="font-semibold">{getLibrarySourceDisplayName(source)}</p>
-                  <p className="mt-1 text-sm text-muted-foreground">
-                    {source.category} · {source.platform} · {countUrls(source.urls)} URLs · {getSyncStatus(source)} · {countWords(source.content)} words
-                  </p>
-                </button>
-              ))}
-            </div>
-          )}
-          {selectedLibrarySources.length > 0 && (
-            <div className="mt-3 flex flex-wrap gap-2">
-                  {selectedLibrarySources.map((source) => (
-                <Pill key={source.id}>
-                  {getLibrarySourceDisplayName(source)} · {getSyncStatus(source)}
-                </Pill>
-              ))}
-            </div>
-          )}
-          {selectedLibrarySources
-            .filter((source) => hasStoredUrls(source.urls) && !source.content.trim())
-            .map((source) => (
-              <SubtleNote key={source.id}>
-                {getLibrarySourceDisplayName(source)}: URL saved. Add pasted content later to ground claims.
-              </SubtleNote>
-            ))}
-          {selectedLibrarySources
-            .filter((source) => source.content.trim())
-            .map((source) => (
-              <SubtleNote key={`${source.id}-ready`}>
-                {getLibrarySourceDisplayName(source)}: Ready for generation.
-              </SubtleNote>
-            ))}
-          <p className="mt-2 text-sm text-muted-foreground">
-            Company Knowledge is Conduit source-of-truth facts and context. Public website URLs can be fetched from the Company Knowledge page; social URLs still need manual pasted content.
-          </p>
-        </div>}
-
-        {isAdvanced ? <div className="rounded-lg border border-slate-200 bg-slate-50 p-4">
-          <p className="text-xs font-extrabold uppercase tracking-wide text-muted-foreground">
-            Brand Voice Rules: global rules
-          </p>
-          <p className="mt-2 text-sm leading-6 text-muted-foreground">
-            Every generated post uses the saved Brand Voice Rules for tone, style, audience, and avoid rules.
-          </p>
-        </div> : (
-          <div className="rounded-lg border border-primary/20 bg-teal-50 p-3 text-sm font-semibold text-primary">
-            Using Conduit Company Knowledge automatically.
+        <textarea
+          value={manualDraft}
+          onChange={(event) => setManualDraft(event.target.value)}
+          className="mt-4 min-h-24 w-full rounded-md border border-input p-3 text-sm"
+          placeholder="Optional: paste a manual draft here, then save it to Review Drafts."
+        />
+        {generationError && (
+          <div className="mt-4 rounded-md border border-red-200 bg-red-50 p-4 text-sm font-semibold text-red-700">
+            {generationError}
           </div>
         )}
-
-        {!isAdvanced && (
-          <div className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
-            <p className="text-xs font-extrabold uppercase tracking-wide text-muted-foreground">Brief check</p>
-            <div className="mt-3 grid gap-2 sm:grid-cols-3">
-              {friendlyChecks.map((check, index) => (
-                <div key={`${check.label}-${index}`} className="flex items-center gap-2 text-sm">
-                  <span
-                    className={cn(
-                      "flex h-6 w-6 items-center justify-center rounded-full text-[10px] font-bold",
-                      check.ok ? "bg-teal-100 text-primary" : "bg-amber-100 text-amber-800"
-                    )}
-                  >
-                    {check.ok ? "OK" : "!"}
-                  </span>
-                  <span className={check.ok ? "font-semibold text-foreground" : "font-semibold text-amber-800"}>
-                    {check.label}
-                  </span>
-                </div>
-              ))}
-            </div>
+        {generationNotice && (
+          <div className="mt-4 rounded-md border border-teal-200 bg-teal-50 p-4 text-sm font-semibold text-teal-900">
+            {generationNotice}
           </div>
         )}
-
-        {isAdvanced && <div className="rounded-lg border border-primary/20 bg-teal-50 p-5 shadow-sm">
-          <div className="flex items-start justify-between gap-4">
-            <div>
-              <p className="text-sm font-bold uppercase text-primary">Creative Brief</p>
-              <h3 className="mt-1 text-lg font-bold">Ready to generate</h3>
-            </div>
-            <Pill>{selectedPlatforms.length || 1} platforms</Pill>
-          </div>
-          <div className="mt-4 grid gap-3 md:grid-cols-2">
-            <BriefItem
-              label="Template"
-              value={campaignTemplate}
-            />
-            <BriefItem
-              label="Posting Account"
-              value={
-                selectedProfile
-                  ? `${selectedProfile.name} · ${selectedProfile.type}`
-                  : "General brand profile"
-              }
-            />
-            <BriefItem
-              label="Voice Influence"
-              value={
-                selectedVoiceInfluences.length > 0
-                  ? selectedVoiceInfluences.map((profile) => profile.name).join(", ")
-                  : "No extra internal voices"
-              }
-            />
-            <BriefItem
-              label="Simple style"
-              value={simpleStyleChips.join(", ")}
-            />
-            <BriefItem
-              label="Inspiration / Reference"
-              value={
-                selectedInspirationProfiles.length > 0
-                  ? selectedInspirationProfiles.map((profile) => profile.name).join(", ")
-                  : "No external inspiration"
-              }
-            />
-            <BriefItem
-              label="Platforms"
-              value={(selectedPlatforms.length > 0 ? selectedPlatforms : ["LinkedIn"]).join(", ")}
-            />
-            <BriefItem
-              label="Media"
-              value={
-                mediaContext.filename
-                  ? `${mediaContext.filename} · ${mediaContext.type ?? "media"}`
-                  : "No media attached"
-              }
-            />
-            <BriefItem
-              label="Company Knowledge"
-              value={
-                selectedLibrarySources.length > 0
-                  ? selectedLibrarySources.map(getLibrarySourceDisplayName).join(", ")
-                  : "No items selected"
-              }
-            />
-            <BriefItem
-              label="Content angle"
-              value={contentAngle || "No angle selected"}
-            />
-            <BriefItem
-              label="Intent"
-              value={intent || "No intent added"}
-            />
-            <BriefItem
-              label="Media notes"
-              value={mediaContext.notes || "No manual media notes"}
-            />
-            <BriefItem
-              label="Details quality"
-              value={
-                idea.trim()
-                  ? looksLikeGenericRawIdea(idea)
-                    ? "Needs more specific details"
-                    : "Specific details added"
-                  : mediaContext.notes?.trim()
-                    ? "Using media notes as raw context"
-                    : "Needs details or media notes"
-              }
-            />
-            <BriefItem
-              label="Brand Voice Rules"
-              value={`${brandVoice.tone}. Avoid: ${brandVoice.avoid}`}
-            />
-          </div>
-        </div>}
-
-        {isAdvanced && <div className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
-          <p className="text-xs font-extrabold uppercase tracking-wide text-muted-foreground">
-            Brief Quality Check
-          </p>
-          <div className="mt-4 grid gap-2 md:grid-cols-2">
-            {qualityChecks.map((check) => (
-              <div key={check.label} className="flex items-center gap-2 text-sm">
-                <span
-                  className={cn(
-                    "flex h-6 w-6 items-center justify-center rounded-full text-[10px] font-bold",
-                    check.ok ? "bg-teal-100 text-primary" : "bg-red-100 text-red-700"
-                  )}
-                >
-                  {check.ok ? "OK" : "!"}
-                </span>
-                <span className={check.ok ? "text-foreground" : "font-semibold text-red-700"}>
-                  {check.label}
-                </span>
-              </div>
-            ))}
-          </div>
-          {generationBlocked && (
-            <p className="mt-3 text-sm font-semibold text-red-700">
-              Complete the missing brief items before generating.
-            </p>
-          )}
-        </div>}
-
-        <div className="flex justify-end">
-          <Button onClick={handleGenerate} disabled={isGenerating || generationBlocked}>
-            <Sparkles size={16} /> {isGenerating ? "Generating..." : "Generate"}
-          </Button>
-        </div>
-        {(generationError || generationNotice) && (
-          <div
-            className={cn(
-              "rounded-md border p-4 text-sm",
-              generationError
-                ? "border-red-200 bg-red-50 text-red-700"
-                : "border-teal-200 bg-teal-50 text-teal-800"
-            )}
-          >
-            <p className="font-semibold">
-              {generationError ? "AI generation issue" : "Generation status"}
-            </p>
-            <p className="mt-1">{generationError || generationNotice}</p>
-            {generationError && (
-              !generationError.includes("Add a specific raw idea") && (
-                <Button className="mt-3" size="sm" variant="secondary" onClick={handleMockFallback}>
-                  Use mock fallback
-                </Button>
-              )
-            )}
-          </div>
-        )}
-      </div>
-    </Card>
-  );
-}
-
-function BriefItem({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="rounded-lg border border-white/70 bg-white/85 p-3 shadow-sm">
-      <p className="text-xs font-extrabold uppercase tracking-wide text-muted-foreground">{label}</p>
-      <p className="mt-1 line-clamp-3 text-sm font-semibold leading-6">{value}</p>
+      </Card>
     </div>
   );
 }
 
-const postDetailLabels = [
-  "Recommended media use",
-  "Optional alt text",
-  "Suggested overlay text",
-  "CTA"
-];
 
-const optionLabels = ["Option 1: Recommended", "Option 2: Shorter", "Option 3: More founder-led"];
 
-const simpleStyleOptions: { label: SimpleStyleChip; instruction: string }[] = [
-  {
-    label: "Conduit default",
-    instruction: "Use normal Conduit company voice: direct, practical, clear, and grounded in real operations."
-  },
-  {
-    label: "More founder-led",
-    instruction: "Make the post more direct, human, and founder-led, with less corporate polish."
-  },
-  {
-    label: "More technical",
-    instruction: "Make the post more precise, product/process-oriented, and specific about systems or workflow."
-  },
-  {
-    label: "Bolder",
-    instruction: "Use a stronger hook, more conviction, and a clearer point of view."
-  },
-  {
-    label: "More polished",
-    instruction: "Use a cleaner, company-safe tone while keeping it plainspoken."
-  },
-  {
-    label: "More concise",
-    instruction: "Make the output shorter, tighter, and easier to skim."
-  }
-];
 
-function supportingDetailsFromPost(post: GeneratedPost) {
-  return [
-    { label: "Recommended media use", value: post.recommendedMediaUse || extractPostDetail(post.content, "Recommended media use") },
-    { label: "Alt text", value: post.altText || extractPostDetail(post.content, "Optional alt text") },
-    { label: "Overlay text", value: post.overlayText || extractPostDetail(post.content, "Suggested overlay text") },
-    { label: "CTA", value: post.cta || extractPostDetail(post.content, "CTA") },
-    { label: "Hashtags", value: post.hashtags?.join(" ") ?? "" },
-    { label: "First comment", value: post.firstComment ?? "" },
-    { label: "Carousel ideas", value: post.carouselIdeas?.join("\n") ?? "" },
-    { label: "Shot list", value: post.shotList?.join("\n") ?? "" }
-  ].filter((detail) => detail.value);
-}
-
-function supportingFieldsFromPost(post: GeneratedPost) {
-  return {
-    rationale: post.rationale,
-    recommendedMediaUse: post.recommendedMediaUse || extractPostDetail(post.content, "Recommended media use"),
-    altText: post.altText || extractPostDetail(post.content, "Optional alt text"),
-    overlayText: post.overlayText || extractPostDetail(post.content, "Suggested overlay text"),
-    cta: post.cta || extractPostDetail(post.content, "CTA"),
-    hashtags: post.hashtags ?? [],
-    firstComment: post.firstComment,
-    carouselIdeas: post.carouselIdeas ?? [],
-    shotList: post.shotList ?? [],
-    safetyCheck: post.safetyCheck
-  };
-}
-
-type ReadinessItem = {
-  label: string;
-  passed: boolean;
-  suggestion: string;
-};
-
-const improveActions = [
-  { label: "Strengthen hook", instruction: "Strengthen the opening hook and make the first line more specific." },
-  { label: "Make shorter", instruction: "Make this shorter and tighter while preserving the core idea." },
-  { label: "Add CTA", instruction: "Add a clear, natural CTA that fits the platform." },
-  { label: "Add alt text", instruction: "Add useful alt text or media accessibility guidance." },
-  { label: "Make less generic", instruction: "Make this less generic by adding concrete details from the content brief." },
-  { label: "Improve media fit", instruction: "Connect the post more clearly to the uploaded media or media notes." },
-  { label: "Make it more Conduit", instruction: "Rewrite this to be more Conduit: specific, grounded in factory automation and real operations, less hypey, more direct, and closer to the selected brief and media context." }
-];
-
-const brandSafetyQuickActions = [
-  { label: "Make safer", instruction: "Make this safer by removing unsupported claims, confidential details, and sensitive operational specifics." },
-  { label: "Remove unsupported claim", instruction: "Remove unsupported claims and keep only what is grounded in the content brief or Company Knowledge." },
-  { label: "Make less hypey", instruction: "Make this less hypey, more precise, and less promotional." },
-  { label: "Make more specific", instruction: "Make this more specific using only the current content brief, media notes, and Company Knowledge." }
-];
-
-const unsupportedClaimPatterns = [
-  /\bguarantee(?:d|s)?\b/i,
-  /\bproven\b/i,
-  /\bonly\b/i,
-  /\bbest\b/i,
-  /\beliminates?\b/i,
-  /\bworld[- ]?class\b/i,
-  /\bindustry[- ]?leading\b/i,
-  /\bfirst\b/i,
-  /\bnever\b/i,
-  /\balways\b/i,
-  /\b\d+%|\b\d+x\b/i,
-  /\b(days?|hours?|weeks?)\b/i
-];
-
-const genericAiPatterns = [
-  /\bin today's (?:fast-paced|ever-changing|rapidly evolving)\b/i,
-  /\bunlocks? (?:the )?power\b/i,
-  /\bunlock(?:s|ed|ing)?\b/i,
-  /\belevat(?:e|es|ed|ing)\b/i,
-  /\bempower(?:s|ed|ing)?\b/i,
-  /\bsupercharge(?:s|d|ing)?\b/i,
-  /\bnext[- ]gen\b/i,
-  /\bcutting[- ]edge\b/i,
-  /\bgame[- ]changing\b/i,
-  /\brevolution(?:ary|ize|izes|ized|izing)\b/i,
-  /\bseamless(?:ly)?\b/i,
-  /\btransform(?:ing|s)? the way\b/i,
-  /\binnovation for innovation(?:'s)? sake\b/i,
-  /\bgeneric “?future of work”? language\b/i,
-  /\btake (?:it|things|your \w+) to the next level\b/i,
-  /\bwhere .* meets .*\b/i
-];
-
-const overhypedPatterns = [
-  /\bmassive\b/i,
-  /\bdominates?\b/i,
-  /\bcrush(?:es|ing)?\b/i,
-  /\bdisrupt(?:s|ing|ive)\b/i,
-  /\bunstoppable\b/i,
-  /\bthe future of\b/i
-];
-
-const sensitivePatterns = [
-  /\bconfidential\b/i,
-  /\bsecret\b/i,
-  /\bNDA\b/i,
-  /\bcustomer name\b/i,
-  /\bclient name\b/i,
-  /\bproprietary\b/i,
-  /\bfloor plan\b/i,
-  /\badministrator password\b/i,
-  /\bcredential\b/i,
-  /\baccess badge\b/i
-];
-
-function runFallbackBrandSafetyCheck(
-  copy: string,
-  campaign?: Campaign,
-  post?: GeneratedPost
-): BrandSafetyCheck {
-  const notes = new Set<string>();
-  const normalizedCopy = copy.trim();
-  const knowledgeText = [
-    ...(campaign?.sourceLibraryNames ?? []),
-    ...(post?.sourceLibraryNames ?? [])
-  ].join(" ");
-  const hasCompanyKnowledge = knowledgeText.trim().length > 0;
-
-  if (!normalizedCopy) {
-    notes.add("Post copy is empty");
-  }
-
-  if (unsupportedClaimPatterns.some((pattern) => pattern.test(normalizedCopy)) && !hasCompanyKnowledge) {
-    notes.add("Claim needs source");
-  }
-
-  if (genericAiPatterns.some((pattern) => pattern.test(normalizedCopy))) {
-    notes.add("Tone sounds generic or over-polished");
-  }
-
-  if (overhypedPatterns.some((pattern) => pattern.test(normalizedCopy))) {
-    notes.add("Language may be overhyped");
-  }
-
-  if (sensitivePatterns.some((pattern) => pattern.test(normalizedCopy))) {
-    notes.add("Customer detail may need approval");
-  }
-
-  if (campaign?.mediaContext?.filename || post?.mediaUsed) {
-    const mediaWarnings = campaign?.mediaContext?.analysis?.warnings ?? [];
-    if (mediaWarnings.length > 0 || /whiteboard|factory floor|workspace|badge|screen|notes|diagram/i.test(campaign?.mediaContext?.analysis?.description ?? campaign?.mediaContext?.notes ?? "")) {
-      notes.add("Media may show sensitive workspace details");
-    }
-  }
-
-  if (post?.platform === "X" && normalizedCopy.length > 280) {
-    notes.add("Platform length issue");
-  }
-
-  if (post?.platform === "LinkedIn" && normalizedCopy.split(/\s+/).filter(Boolean).length > 320) {
-    notes.add("Platform length issue");
-  }
-
-  const noteList = Array.from(notes);
-  const riskyNotes = ["Post copy is empty", "Customer detail may need approval"];
-  const status = noteList.some((note) => riskyNotes.includes(note))
-    ? "Risky"
-    : notes.size > 0
-      ? "Needs review"
-      : "Safe";
-
-  return {
-    status,
-    notes: noteList.length > 0 ? noteList : ["No obvious claim, privacy, or tone risks found."],
-    checkedAt: new Date().toISOString(),
-    source: "Fallback"
-  };
-}
-
-function safetyCheckForPost(post: GeneratedPost, campaign?: Campaign) {
-  return post.safetyCheck ?? runFallbackBrandSafetyCheck(userFacingPostContent(post.content, campaign, post), campaign, post);
-}
-
-function safetyStatusClass(status: BrandSafetyCheck["status"]) {
-  if (status === "Safe") return "bg-teal-100 text-primary";
-  if (status === "Needs review") return "bg-amber-100 text-amber-800";
-  return "bg-red-100 text-red-700";
-}
-
-function applyBrandSafetyQuickFix(copy: string, instruction: string) {
-  let nextCopy = sanitizeConduitCopy(copy)
-    .replace(/\b(game[- ]changing|revolutionary|industry[- ]leading|world[- ]class|massive|unstoppable)\b/gi, "meaningful")
-    .replace(/\bguaranteed?\b/gi, "intended")
-    .replace(/\balways\b/gi, "often")
-    .replace(/\bnever\b/gi, "rarely")
-    .replace(/\bthe only\b/gi, "one");
-
-  if (/unsupported claim/i.test(instruction)) {
-    nextCopy = nextCopy.replace(/\b\d+%|\b\d+x\b/gi, "").replace(/\bproven\b/gi, "useful");
-  }
-
-  if (/more specific/i.test(instruction) && !/Conduit/i.test(nextCopy)) {
-    nextCopy = `Conduit: ${nextCopy}`;
-  }
-
-  if (/more conduit/i.test(instruction)) {
-    nextCopy = nextCopy
-      .replace(/\bsolution\b/gi, "system")
-      .replace(/\busers\b/gi, "operators")
-      .replace(/\bworkflow\b/gi, "operation");
-  }
-
-  return nextCopy.replace(/[ \t]{2,}/g, " ").replace(/\n{3,}/g, "\n\n").trim();
-}
-
-function postReadiness(post: GeneratedPost, campaign?: Campaign) {
-  const copy = userFacingPostContent(post.content, campaign, post);
-  const safety = safetyCheckForPost(post, campaign);
-  const wordCount = copy.split(/\s+/).filter(Boolean).length;
-  const firstLine = copy.split("\n").find(Boolean) ?? "";
-  const hasMedia = Boolean(post.mediaUsed || campaign?.mediaContext?.filename || campaign?.mediaContext?.notes);
-  const hasCta = Boolean(post.cta || /\b(follow|learn|read|watch|save|comment|dm|tell us|join|apply|reach out)\b/i.test(copy));
-  const hasGenericLanguage = genericAiPatterns.some((pattern) => pattern.test(copy));
-  const hasUnsupportedClaim = unsupportedClaimPatterns.some((pattern) => pattern.test(copy)) && safety.status !== "Safe";
-  const hasOperationalSpecificity = /\b(factory|robot|machine|sensor|operator|workcell|cell|plc|hardware|deployment|line|floor|whiteboard|integration|handoff|automation|manufacturing|industrial)\b/i.test(copy);
-  const vagueHook = /^(excited to share|big news|we're thrilled|introducing|here('| i)s|in today)/i.test(firstLine) || firstLine.length < 18;
-  const hasAltText = !hasMedia || Boolean(post.altText);
-  const hasHashtagsOrFormat =
-    post.platform === "Instagram" || post.platform === "TikTok"
-      ? Boolean(post.hashtags?.length || post.overlayText || post.carouselIdeas?.length || post.shotList?.length)
-      : true;
-  const platformFit =
-    post.platform === "X"
-      ? copy.length <= 280
-      : post.platform === "LinkedIn"
-        ? wordCount >= 35 && wordCount <= 260
-        : post.platform === "Instagram"
-          ? Boolean(post.overlayText || post.carouselIdeas?.length || copy.length <= 2200)
-          : Boolean(post.overlayText || post.shotList?.length || wordCount <= 120);
-  const lengthFit =
-    post.platform === "X"
-      ? copy.length <= 280
-      : post.platform === "TikTok"
-        ? wordCount <= 120
-        : wordCount >= 25 && wordCount <= 260;
-  const items: ReadinessItem[] = [
-    {
-      label: "Hook strength",
-      passed: firstLine.length >= 18 && firstLine.length <= 140 && !vagueHook,
-      suggestion: "Open with a sharper, more specific first line."
-    },
-    {
-      label: "Clarity",
-      passed: wordCount >= 12 && !looksLikeGenericRawIdea(copy),
-      suggestion: "Make the core point more concrete."
-    },
-    {
-      label: "Platform fit",
-      passed: platformFit,
-      suggestion: "Adjust length and structure for this platform."
-    },
-    {
-      label: "Brand voice fit",
-      passed: !hasGenericLanguage && hasOperationalSpecificity,
-      suggestion: "Remove generic language and add real operational detail."
-    },
-    {
-      label: "Media fit",
-      passed: !hasMedia || Boolean(post.recommendedMediaUse || campaign?.mediaContext?.notes),
-      suggestion: "Connect the copy more directly to the media."
-    },
-    {
-      label: "CTA strength",
-      passed: hasCta,
-      suggestion: "Add a light CTA or next step."
-    },
-    {
-      label: "Length fit",
-      passed: lengthFit,
-      suggestion: "Tighten or expand to fit the platform."
-    },
-    {
-      label: "Hashtags/format fit",
-      passed: hasHashtagsOrFormat,
-      suggestion: "Add platform-native formatting, hashtags, carousel ideas, or shot list."
-    },
-    {
-      label: "Alt text/media accessibility",
-      passed: hasAltText,
-      suggestion: "Add alt text or accessibility guidance for the media."
-    },
-    {
-      label: "Risk/safety check",
-      passed: safety.status === "Safe",
-      suggestion: "Check unsupported claims or sensitive details."
-    }
-  ];
-  const baseScore = Math.round((items.filter((item) => item.passed).length / items.length) * 100);
-  const penalty =
-    (hasGenericLanguage ? 12 : 0) +
-    (vagueHook ? 10 : 0) +
-    (hasUnsupportedClaim ? 12 : 0) +
-    (!hasOperationalSpecificity ? 8 : 0) +
-    (hasMedia && !post.recommendedMediaUse && !campaign?.mediaContext?.notes ? 6 : 0);
-  const bonus =
-    (hasOperationalSpecificity ? 6 : 0) +
-    (hasMedia && Boolean(post.recommendedMediaUse || campaign?.mediaContext?.notes) ? 5 : 0) +
-    (!hasGenericLanguage && safety.status === "Safe" ? 4 : 0);
-  const score = Math.max(0, Math.min(100, baseScore - penalty + bonus));
-  const suggestions = items
-    .filter((item) => !item.passed)
-    .map((item) => item.suggestion)
-    .slice(0, 4);
-  return {
-    score,
-    label: score >= 85 ? "Ready" : score >= 65 ? "Good" : "Needs work",
-    items,
-    suggestions
-  };
-}
-
-function PostReadinessPanel({
-  post,
-  campaign,
-  onImprove,
-  compact = false
+function OpportunityInbox({
+  opportunities,
+  setOpportunities,
+  persistOpportunity,
+  profiles,
+  setProfiles,
+  persistProfile,
+  librarySources,
+  setLibrarySources,
+  persistLibrarySource,
+  brandVoice,
+  queueApprovedReply,
+  setCampaignName,
+  setIntent,
+  setIdea,
+  setSelectedPlatforms,
+  setSelectedProfileId,
+  setActiveOpportunityContext,
+  setScreen,
+  recordActivity
 }: {
-  post: GeneratedPost;
-  campaign?: Campaign;
-  onImprove?: (instruction: string) => void;
-  compact?: boolean;
+  opportunities: Opportunity[];
+  setOpportunities: (items: Opportunity[] | ((current: Opportunity[]) => Opportunity[])) => void;
+  persistOpportunity: (opportunity: Opportunity) => void;
+  profiles: Profile[];
+  setProfiles: (items: Profile[] | ((current: Profile[]) => Profile[])) => void;
+  persistProfile: (profile: Profile) => void;
+  librarySources: LibrarySource[];
+  setLibrarySources: (items: LibrarySource[] | ((current: LibrarySource[]) => LibrarySource[])) => void;
+  persistLibrarySource: (source: LibrarySource) => void;
+  brandVoice: BrandVoiceProfile;
+  queueApprovedReply: (opportunity: Opportunity, reply: OpportunityReplyDraft, approvedReply: string, profile?: Profile) => PostQueueItem;
+  setCampaignName: (value: string) => void;
+  setIntent: (value: string) => void;
+  setIdea: (value: string) => void;
+  setSelectedPlatforms: (platforms: Platform[]) => void;
+  setSelectedProfileId: (id: string) => void;
+  setActiveOpportunityContext: (context: { id: string; title: string } | null) => void;
+  setScreen: (screen: Screen) => void;
+  recordActivity: (input: Omit<ActivityLogItem, "id" | "createdAt" | "userEmail" | "workspaceName">) => ActivityLogItem;
 }) {
-  const readiness = postReadiness(post, campaign);
-  const [showFullScore, setShowFullScore] = useState(!compact);
-  const barClass =
-    readiness.score >= 85
-      ? "bg-primary"
-      : readiness.score >= 65
-        ? "bg-amber-500"
-        : "bg-red-500";
+  const [title, setTitle] = useState("");
+  const [opportunityType, setOpportunityType] = useState<OpportunityType>("Trend");
+  const [sourceUrl, setSourceUrl] = useState("");
+  const [pastedText, setPastedText] = useState("");
+  const [notes, setNotes] = useState("");
+  const [platform, setPlatform] = useState<OpportunityPlatform>("X");
+  const [urgency, setUrgency] = useState<OpportunityUrgency>("Medium");
+  const [status, setStatus] = useState<OpportunityStatus>("New");
+  const [tags, setTags] = useState("");
+  const [screenshot, setScreenshot] = useState<Opportunity["screenshot"]>();
+  const [isAnalyzing, setIsAnalyzing] = useState(false);
+  const [message, setMessage] = useState("");
+  const [error, setError] = useState("");
+  const [typeFilter, setTypeFilter] = useState<OpportunityType | "All">("All");
+  const [platformFilter, setPlatformFilter] = useState<OpportunityPlatform | "All">("All");
+  const [statusFilter, setStatusFilter] = useState<OpportunityStatus | "All">("All");
+  const [urgencyFilter, setUrgencyFilter] = useState<OpportunityUrgency | "All">("All");
+  const [tagFilter, setTagFilter] = useState("");
+  const [selectedOpportunityId, setSelectedOpportunityId] = useState("");
+  const [replyOpportunityId, setReplyOpportunityId] = useState("");
+  const [replyContext, setReplyContext] = useState("");
+  const [replyProfileId, setReplyProfileId] = useState("");
+  const [isDraftingReply, setIsDraftingReply] = useState(false);
+  const [copyState, setCopyState] = useState("");
+  const selectedOpportunity = opportunities.find((item) => item.id === selectedOpportunityId);
+  const replyOpportunity = opportunities.find((item) => item.id === replyOpportunityId);
+  const defaultReplyProfile = findDefaultPostingAccount(profiles);
+  const activeReplyProfileId = replyProfileId || defaultReplyProfile?.id || profiles[0]?.id || "";
+
+  const filteredOpportunities = opportunities.filter((opportunity) => {
+    const matchesType = typeFilter === "All" || opportunity.opportunityType === typeFilter;
+    const matchesPlatform = platformFilter === "All" || opportunity.platform === platformFilter;
+    const matchesStatus = statusFilter === "All" || opportunity.status === statusFilter;
+    const matchesUrgency = urgencyFilter === "All" || opportunity.urgency === urgencyFilter;
+    const matchesTag = !tagFilter.trim() || opportunity.tags.some((tag) => tag.toLowerCase().includes(tagFilter.toLowerCase()));
+    return matchesType && matchesPlatform && matchesStatus && matchesUrgency && matchesTag;
+  });
+
+  function clearForm() {
+    setTitle("");
+    setOpportunityType("Trend");
+    setSourceUrl("");
+    setPastedText("");
+    setNotes("");
+    setPlatform("X");
+    setUrgency("Medium");
+    setStatus("New");
+    setTags("");
+    setScreenshot(undefined);
+    setMessage("");
+    setError("");
+  }
+
+  async function handleScreenshot(file?: File) {
+    if (!file) return;
+    if (!file.type.startsWith("image/")) {
+      setError("Upload an image screenshot.");
+      return;
+    }
+    setScreenshot({
+      filename: file.name,
+      fileType: file.type,
+      size: file.size,
+      dataUrl: await readFileAsDataUrl(file)
+    });
+  }
+
+  function saveOpportunity(next: Opportunity) {
+    setOpportunities((current) => [next, ...current.filter((item) => item.id !== next.id)]);
+    persistOpportunity(next);
+  }
+
+  async function analyzeOpportunity(base?: Opportunity) {
+    setIsAnalyzing(true);
+    setMessage("");
+    setError("");
+    const working = base ?? {
+      id: `opp-${Date.now()}`,
+      title: title.trim() || "Untitled opportunity",
+      opportunityType,
+      sourceUrl: sourceUrl.trim(),
+      platform,
+      pastedText: pastedText.trim(),
+      screenshot,
+      urgency,
+      status,
+      tags: splitTags(tags),
+      notes: notes.trim(),
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString()
+    } satisfies Opportunity;
+
+    try {
+      const response = await fetch("/api/opportunities/analyze", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          title: working.title,
+          opportunityType: working.opportunityType,
+          sourceUrl: working.sourceUrl,
+          platform: working.platform,
+          pastedText: working.pastedText,
+          notes: working.notes,
+          tags: working.tags
+        })
+      });
+      const payload = await readJsonResponse(response, "Opportunity analysis failed");
+      if (!response.ok || !payload?.ok) {
+        throw new Error(payload?.error ?? "Opportunity analysis failed.");
+      }
+      const next = {
+        ...working,
+        analysis: payload.analysis as OpportunityAnalysis,
+        status: working.status === "New" ? "Reviewed" as const : working.status,
+        updatedAt: new Date().toISOString()
+      };
+      saveOpportunity(next);
+      recordActivity({
+        actionType: "Opportunity analyzed",
+        objectType: "Opportunity",
+        objectId: next.id,
+        title: "Opportunity analyzed",
+        summary: `${next.title} now has a suggested Conduit angle and next action.`,
+        destination: "Opportunity Inbox",
+        status: "success"
+      });
+      setSelectedOpportunityId(next.id);
+      setMessage(payload.generatedBy === "AI" ? "Opportunity analyzed." : "Opportunity analyzed with fallback logic.");
+      if (!base) clearForm();
+    } catch (analysisError) {
+      setError(analysisError instanceof Error ? analysisError.message : "Opportunity analysis failed.");
+    } finally {
+      setIsAnalyzing(false);
+    }
+  }
+
+  function createOpportunity() {
+    setMessage("");
+    setError("");
+    if (!title.trim() && !sourceUrl.trim() && !pastedText.trim() && !notes.trim()) {
+      setError("Add a title, link, note, or pasted text first.");
+      return;
+    }
+    const next: Opportunity = {
+      id: `opp-${Date.now()}`,
+      title: title.trim() || sourceUrl.trim() || "Untitled opportunity",
+      opportunityType,
+      sourceUrl: sourceUrl.trim(),
+      platform,
+      pastedText: pastedText.trim(),
+      screenshot,
+      urgency,
+      status,
+      tags: splitTags(tags),
+      notes: notes.trim(),
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString()
+    };
+    saveOpportunity(next);
+    setSelectedOpportunityId(next.id);
+    setMessage("Opportunity saved.");
+    recordActivity({
+      actionType: "Opportunity created",
+      objectType: "Opportunity",
+      objectId: next.id,
+      title: "Opportunity created",
+      summary: `${next.title} was added to Opportunity Inbox.`,
+      destination: "Opportunity Inbox",
+      status: "success"
+    });
+    clearForm();
+  }
+
+  function updateOpportunity(opportunity: Opportunity, updates: Partial<Opportunity>) {
+    const next = { ...opportunity, ...updates, updatedAt: new Date().toISOString() };
+    setOpportunities((current) => current.map((item) => item.id === next.id ? next : item));
+    persistOpportunity(next);
+    if (updates.status === "Archived" && opportunity.status !== "Archived") {
+      recordActivity({
+        actionType: "Item archived",
+        objectType: "Opportunity",
+        objectId: next.id,
+        title: "Opportunity archived",
+        summary: `${next.title} was archived.`,
+        destination: "Opportunity Inbox",
+        status: "success",
+        undo: {
+          type: "opportunity-status",
+          label: "Restore opportunity",
+          payload: { id: opportunity.id, status: opportunity.status }
+        }
+      });
+    }
+  }
+
+  function openReplyFlow(opportunity: Opportunity) {
+    setReplyOpportunityId(opportunity.id);
+    setReplyContext(opportunity.pastedText || opportunity.notes || opportunity.analysis?.suggestedFirstDraftIdea || "");
+    setReplyProfileId(defaultReplyProfile?.id || profiles[0]?.id || "");
+    setMessage("");
+    setError("");
+  }
+
+  async function draftReply(opportunity: Opportunity, options: {
+    instruction?: string;
+    contextOverride?: string;
+    existingReply?: string;
+  } = {}) {
+    setIsDraftingReply(true);
+    setMessage("");
+    setError("");
+    try {
+      const profile = profiles.find((item) => item.id === activeReplyProfileId) || defaultReplyProfile;
+      const activeKnowledge = librarySources
+        .filter((source) => source.reviewStatus !== "Save only")
+        .slice(0, 6)
+        .map((source) => ({
+          name: source.name,
+          content: source.content?.slice(0, 1400),
+          notes: source.notes,
+          proofPoints: source.analysis?.proofPoints
+        }));
+      const response = await fetch("/api/opportunities/draft-reply", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          title: opportunity.title,
+          opportunityType: opportunity.opportunityType,
+          platform: opportunity.platform,
+          sourceUrl: opportunity.sourceUrl,
+          pastedText: options.contextOverride || replyContext || opportunity.pastedText,
+          notes: opportunity.notes,
+          analysis: opportunity.analysis,
+          instruction: options.instruction,
+          existingReply: options.existingReply,
+          companyKnowledge: activeKnowledge,
+          brandVoiceRules: {
+            tone: brandVoice.tone,
+            style: brandVoice.style,
+            audience: brandVoice.audience,
+            avoid: brandVoice.avoid
+          },
+          postingAccount: profile
+            ? {
+                name: profile.name,
+                type: profile.type,
+                role: profile.role,
+                bio: profile.bio,
+                notes: profile.notes
+              }
+            : undefined
+        })
+      });
+      const payload = await readJsonResponse(response, "Reply draft failed");
+      if (!response.ok || !payload?.ok) {
+        throw new Error(payload?.error ?? "Reply draft failed.");
+      }
+      const now = new Date().toISOString();
+      const draft = {
+        id: `reply-${Date.now()}`,
+        ...(payload.replyDraft as Omit<OpportunityReplyDraft, "id" | "status" | "createdAt" | "updatedAt">),
+        status: "Draft",
+        createdAt: now,
+        updatedAt: now
+      } satisfies OpportunityReplyDraft;
+      const next = {
+        ...opportunity,
+        status: "Reply drafted" as const,
+        replyDrafts: [draft, ...(opportunity.replyDrafts ?? [])],
+        updatedAt: now
+      };
+      saveOpportunity(next);
+      recordActivity({
+        actionType: "Reply drafted",
+        objectType: "Reply",
+        objectId: draft.id,
+        title: "Reply drafted",
+        summary: `${opportunity.title} has reply options ready for review.`,
+        destination: "Opportunity Inbox",
+        status: "success"
+      });
+      setSelectedOpportunityId(next.id);
+      setReplyOpportunityId(next.id);
+      setMessage(options.instruction
+        ? payload.generatedBy === "AI" ? "Reply regenerated." : "Reply regenerated with fallback logic."
+        : payload.generatedBy === "AI" ? "Reply drafted." : "Reply drafted with fallback logic.");
+    } catch (replyError) {
+      setError(replyError instanceof Error ? replyError.message : "Reply draft failed.");
+    } finally {
+      setIsDraftingReply(false);
+    }
+  }
+
+  async function copyReply(text: string, id: string) {
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopyState(id);
+      window.setTimeout(() => setCopyState(""), 1200);
+    } catch {
+      setCopyState("");
+    }
+  }
+
+  function approveReply(opportunity: Opportunity, reply: OpportunityReplyDraft, selectedKey: OpportunityReplyDraft["selectedReply"] = "shortReply") {
+    const approvedReply = reply[selectedKey || "shortReply"] || reply.shortReply;
+    const profile = profiles.find((item) => item.id === activeReplyProfileId) || defaultReplyProfile;
+    const nextReply: OpportunityReplyDraft = {
+      ...reply,
+      selectedReply: selectedKey,
+      approvedReply,
+      review: {
+        ...(reply.review ?? {}),
+        status: "Ready to Reply",
+        reviewerName: reply.review?.reviewerName || profile?.name || "Conduit / team",
+        reviewedAt: new Date().toISOString()
+      },
+      status: "Approved",
+      updatedAt: new Date().toISOString()
+    };
+    const next = {
+      ...opportunity,
+      status: "Reviewed" as const,
+      replyDrafts: (opportunity.replyDrafts ?? []).map((item) => item.id === reply.id ? nextReply : item),
+      relatedPostIds: uniqueStrings([...(opportunity.relatedPostIds ?? []), nextReply.id]),
+      updatedAt: new Date().toISOString()
+    };
+    saveOpportunity(next);
+    queueApprovedReply(next, nextReply, approvedReply, profile);
+    setMessage("Reply approved and added to Ready to Reply.");
+  }
+
+  function updateReplyReview(opportunity: Opportunity, reply: OpportunityReplyDraft, review: ReviewMetadata) {
+    const nextReply: OpportunityReplyDraft = {
+      ...reply,
+      review,
+      updatedAt: new Date().toISOString()
+    };
+    const next = {
+      ...opportunity,
+      status:
+        review.status === "Needs review"
+          ? "Reviewed" as const
+          : review.status === "Changes requested"
+            ? "Reply drafted" as const
+            : opportunity.status,
+      replyDrafts: (opportunity.replyDrafts ?? []).map((item) =>
+        item.id === reply.id ? nextReply : item
+      ),
+      updatedAt: new Date().toISOString()
+    };
+    saveOpportunity(next);
+    setMessage(
+      review.status === "Needs review"
+        ? `Reply sent to ${review.reviewerName || "review"}.`
+        : review.status === "Changes requested"
+          ? "Reply changes requested."
+          : "Reply review updated."
+    );
+  }
+
+  function archiveReply(opportunity: Opportunity, reply: OpportunityReplyDraft) {
+    const nextReply: OpportunityReplyDraft = {
+      ...reply,
+      status: "Archived",
+      updatedAt: new Date().toISOString()
+    };
+    const remainingActiveDrafts = (opportunity.replyDrafts ?? []).some((item) => item.id !== reply.id && item.status === "Draft");
+    const next = {
+      ...opportunity,
+      status: remainingActiveDrafts ? opportunity.status : "Archived" as const,
+      replyDrafts: (opportunity.replyDrafts ?? []).map((item) => item.id === reply.id ? nextReply : item),
+      updatedAt: new Date().toISOString()
+    };
+    saveOpportunity(next);
+    setMessage("Reply archived.");
+  }
+
+  function createPostFromOpportunity(opportunity: Opportunity, reply = false) {
+    const draftIdea = opportunity.analysis?.suggestedFirstDraftIdea || opportunity.pastedText || opportunity.notes || opportunity.sourceUrl || opportunity.title;
+    const suggestedPlatforms: Platform[] = opportunity.analysis?.suggestedPlatforms?.length
+      ? opportunity.analysis.suggestedPlatforms
+      : opportunity.platform !== "Website" && opportunity.platform !== "Other"
+        ? [opportunity.platform as Platform]
+        : ["LinkedIn"];
+    const conduit = findDefaultPostingAccount(profiles);
+    if (conduit) setSelectedProfileId(conduit.id);
+    setCampaignName(`${reply ? "Reply" : "Opportunity"}: ${opportunity.title}`.slice(0, 80));
+    setIntent(reply
+      ? `Draft a short reply for this opportunity: ${opportunity.title}`
+      : opportunity.analysis?.suggestedConduitAngle || `Create a Conduit post from this opportunity: ${opportunity.title}`);
+    setIdea(draftIdea);
+    setSelectedPlatforms(suggestedPlatforms);
+    setActiveOpportunityContext({ id: opportunity.id, title: opportunity.title });
+    updateOpportunity(opportunity, { status: reply ? "Reply drafted" : "Post drafted" });
+    setScreen("New Campaign");
+  }
+
+  function saveToCompanyKnowledge(opportunity: Opportunity) {
+    const source: LibrarySource = {
+      id: `source-${Date.now()}`,
+      name: `Opportunity - ${opportunity.title}`,
+      category: opportunity.opportunityType === "Customer story" ? "Customer Story" : "Other",
+      platform: opportunity.platform === "Website" ? "Website" : "Mixed",
+      urls: opportunity.sourceUrl,
+      urlType: opportunity.sourceUrl ? "Website URL" : "Other",
+      content: [opportunity.pastedText, opportunity.notes, opportunity.analysis?.whyItMatters, opportunity.analysis?.suggestedConduitAngle].filter(Boolean).join("\n\n"),
+      syncStatus: "Manual Only",
+      lastChecked: currentCheckedAt(),
+      notes: "Saved from Opportunity Inbox.",
+      analysis: {
+        voiceTraits: "Opportunity context.",
+        commonTopics: opportunity.analysis?.relevantBrainThemes?.join(", ") || opportunity.opportunityType,
+        repeatedPhrases: "Review before using as public proof.",
+        strongHooks: opportunity.analysis?.suggestedFirstDraftIdea || "Lead with the concrete opportunity.",
+        proofPoints: "Only use claims supported by Company Knowledge.",
+        avoid: opportunity.analysis?.riskNotes || "Avoid unsupported claims.",
+        bestUseCases: "Content ideas, replies, and social planning."
+      },
+      reviewStatus: "Needs review",
+      tags: opportunity.tags,
+      updatedAt: currentCheckedAt()
+    };
+    setLibrarySources((current) => [source, ...current]);
+    persistLibrarySource(source);
+    setMessage("Saved to Company Knowledge for review.");
+  }
+
+  function saveAsInspirationProfile(opportunity: Opportunity) {
+    const profile: Profile = {
+      ...defaultConduitProfile(),
+      id: `profile-${Date.now()}`,
+      name: opportunity.title,
+      type: opportunity.opportunityType === "Competitor post" ? "Competitor / Market Watch" : "Inspiration / Reference",
+      role: opportunity.opportunityType,
+      bio: opportunity.analysis?.whyItMatters || opportunity.notes,
+      linkedInUrl: opportunity.platform === "LinkedIn" ? opportunity.sourceUrl : "",
+      xUrl: opportunity.platform === "X" ? opportunity.sourceUrl : "",
+      instagramUrl: opportunity.platform === "Instagram" ? opportunity.sourceUrl : "",
+      tiktokUrl: opportunity.platform === "TikTok" ? opportunity.sourceUrl : "",
+      websiteUrl: opportunity.platform === "Website" ? opportunity.sourceUrl : "",
+      examples: opportunity.pastedText,
+      notes: "Created from Opportunity Inbox.",
+      whatWeLike: opportunity.analysis?.whyItMatters || opportunity.notes,
+      patternsToLearn: opportunity.analysis?.suggestedConduitAngle || "",
+      thingsNotToCopy: opportunity.analysis?.riskNotes || "Pattern-only. Do not copy wording, identity, facts, or claims.",
+      voiceSources: opportunity.sourceUrl ? [{
+        id: `profile-source-${Date.now()}`,
+        title: opportunity.title,
+        sourceKind: opportunity.sourceUrl.includes("/status/") || opportunity.sourceUrl.includes("/posts/") ? "post URL" : "account URL",
+        url: opportunity.sourceUrl,
+        platform: opportunity.platform === "Website" ? "Website" : opportunity.platform === "Other" ? "Other URL" : opportunity.platform,
+        sourceType: opportunity.opportunityType === "Competitor post" ? "competitor/market watch" : "inspiration/reference",
+        syncStatus: "stored only",
+        lastSynced: "Never",
+        notes: opportunity.notes,
+        patternOnly: true,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString()
+      }] : []
+    };
+    setProfiles((current) => [profile, ...current]);
+    persistProfile(profile);
+    setMessage("Saved as a pattern-only profile.");
+  }
+
+  const openCounts = {
+    new: opportunities.filter((item) => item.status === "New").length,
+    high: opportunities.filter((item) => item.urgency === "High" && item.status !== "Archived" && item.status !== "Posted").length,
+    drafted: opportunities.filter((item) => item.status === "Drafted" || item.status === "Reply drafted" || item.status === "Post drafted").length
+  };
+
+  function opportunityNextStep(opportunity: Opportunity) {
+    if (opportunity.status === "New") return "Next: analyze it, draft a reply, or create a post.";
+    if (opportunity.status === "Reviewed") return opportunity.analysis?.recommendation === "Reply"
+      ? "Next: draft a reply or create a post from the angle."
+      : "Next: create a post, save it as reference, or archive it.";
+    if (opportunity.status === "Reply drafted") return "Next: approve a reply, then view it in Ready to Reply.";
+    if (opportunity.status === "Post drafted") return "Next: review the generated draft, approve it, then queue it.";
+    if (opportunity.status === "Queued") return "Next: publish manually from Ready to Post.";
+    if (opportunity.status === "Posted") return "Complete: add metrics in Analytics or Content Library.";
+    return "Archived: kept for history.";
+  }
+
+  const opportunityFlowSteps = [
+    "New opportunity",
+    "Analyze",
+    "Draft reply",
+    "Create post",
+    "Queue/post",
+    "Archive"
+  ];
 
   return (
-    <div className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
-      <div className="flex flex-col justify-between gap-2 sm:flex-row sm:items-center">
-        <div>
-          <p className="text-xs font-extrabold uppercase tracking-wide text-muted-foreground">Post Readiness</p>
-          <p className="mt-1 text-2xl font-extrabold tracking-tight">{readiness.score}/100</p>
+    <div className="grid gap-5">
+      <Card className="p-5">
+        <div className="flex flex-col justify-between gap-3 lg:flex-row lg:items-start">
+          <div>
+            <h3 className="text-xl font-extrabold tracking-tight">Opportunity Inbox</h3>
+            <p className="mt-1 max-w-3xl text-sm leading-6 text-muted-foreground">
+              Capture trends, mentions, replies, competitor posts, news, customer moments, and founder thoughts. Turn them into posts, replies, or reference material.
+            </p>
+            <p className="mt-2 text-xs font-bold uppercase tracking-wide text-muted-foreground">
+              Intake = feed the brain · Opportunity Inbox = act on the world
+            </p>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <Pill>{openCounts.new} new</Pill>
+            <Pill>{openCounts.high} high urgency</Pill>
+            <Pill>{openCounts.drafted} drafted</Pill>
+          </div>
         </div>
-        <span className={cn(
-          "rounded-md px-3 py-1 text-sm font-bold shadow-sm",
-          readiness.score >= 85
-            ? "bg-teal-100 text-primary"
-            : readiness.score >= 65
-              ? "bg-amber-100 text-amber-800"
-              : "bg-red-100 text-red-700"
-        )}>
-          {readiness.label}
-        </span>
-      </div>
-      <div className="mt-3 h-2 overflow-hidden rounded-full bg-muted">
-        <div className={cn("h-full rounded-full", barClass)} style={{ width: `${readiness.score}%` }} />
-      </div>
-      {readiness.suggestions.length > 0 && (
-        <div className="mt-3 rounded-md bg-slate-50 p-3">
-          <p className="text-xs font-bold uppercase text-muted-foreground">Top suggestions</p>
-          <ul className="mt-2 space-y-1 text-sm leading-6 text-muted-foreground">
-            {readiness.suggestions.slice(0, compact ? 2 : 4).map((suggestion) => (
-              <li key={suggestion}>{suggestion}</li>
-            ))}
-          </ul>
-        </div>
-      )}
-      {compact && (
-        <button
-          type="button"
-          onClick={() => setShowFullScore((current) => !current)}
-          className="mt-3 text-sm font-bold text-primary"
-        >
-          {showFullScore ? "Hide full score" : "View full score"}
-        </button>
-      )}
-      {showFullScore && (
-        <div className="mt-4 grid gap-2 md:grid-cols-2">
-          {readiness.items.map((item) => (
-            <div key={item.label} className="flex gap-2 rounded-md bg-slate-50 p-2 text-sm">
-              <span className={cn(
-                "mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-[10px] font-bold",
-                item.passed ? "bg-teal-100 text-primary" : "bg-amber-100 text-amber-800"
-              )}>
-                {item.passed ? "OK" : "!"}
-              </span>
-              <span>
-                <span className="font-semibold">{item.label}</span>
-                {!item.passed && <span className="block text-muted-foreground">{item.suggestion}</span>}
-              </span>
+        <div className="mt-4 grid gap-2 md:grid-cols-6">
+          {opportunityFlowSteps.map((step, index) => (
+            <div key={step} className="rounded-lg border border-slate-200 bg-slate-50 p-3">
+              <p className="text-xs font-extrabold uppercase tracking-wide text-muted-foreground">Step {index + 1}</p>
+              <p className="mt-1 text-sm font-bold">{step}</p>
             </div>
           ))}
         </div>
-      )}
-      {onImprove && (
-        <div className="mt-4">
-          <p className="text-xs font-bold uppercase text-muted-foreground">Improve score</p>
-          <div className="mt-2 flex flex-wrap gap-2">
-            {improveActions.map((action) => (
-              <Button
-                key={action.label}
-                size="sm"
-                variant="secondary"
-                onClick={() => onImprove(action.instruction)}
-              >
-                {action.label}
+      </Card>
+
+      <Card className="p-5">
+        <div className="grid gap-4 md:grid-cols-2">
+          <div>
+            <FieldLabel label="Title" htmlFor="opportunity-title" />
+            <input id="opportunity-title" value={title} onChange={(event) => setTitle(event.target.value)} className="mt-2 h-11 w-full rounded-md border border-input px-3 outline-none focus:ring-2 focus:ring-ring" placeholder="Customer shoutout, competitor post, robotics trend..." />
+          </div>
+          <div>
+            <FieldLabel label="Opportunity type" htmlFor="opportunity-type" />
+            <select id="opportunity-type" value={opportunityType} onChange={(event) => setOpportunityType(event.target.value as OpportunityType)} className="mt-2 h-11 w-full rounded-md border border-input bg-white px-3 outline-none focus:ring-2 focus:ring-ring">
+              {opportunityTypes.map((type) => <option key={type} value={type}>{type}</option>)}
+            </select>
+          </div>
+          <div>
+            <FieldLabel label="Source URL" htmlFor="opportunity-url" />
+            <input id="opportunity-url" value={sourceUrl} onChange={(event) => setSourceUrl(event.target.value)} className="mt-2 h-11 w-full rounded-md border border-input px-3 outline-none focus:ring-2 focus:ring-ring" placeholder="https://..." />
+          </div>
+          <div>
+            <FieldLabel label="Related platform" htmlFor="opportunity-platform" />
+            <select id="opportunity-platform" value={platform} onChange={(event) => setPlatform(event.target.value as OpportunityPlatform)} className="mt-2 h-11 w-full rounded-md border border-input bg-white px-3 outline-none focus:ring-2 focus:ring-ring">
+              {opportunityPlatforms.map((item) => <option key={item} value={item}>{item}</option>)}
+            </select>
+          </div>
+          <div className="md:col-span-2">
+            <FieldLabel label="Pasted text / note" htmlFor="opportunity-text" />
+            <textarea id="opportunity-text" value={pastedText} onChange={(event) => setPastedText(event.target.value)} className="mt-2 min-h-28 w-full rounded-md border border-input bg-white p-3 text-sm leading-6 outline-none focus:ring-2 focus:ring-ring" placeholder="Paste the post, reply, article excerpt, customer note, or sales context." />
+          </div>
+          <div>
+            <FieldLabel label="Screenshot" htmlFor="opportunity-screenshot" />
+            <input id="opportunity-screenshot" type="file" accept="image/png,image/jpeg,image/jpg,image/webp" onChange={(event) => handleScreenshot(event.target.files?.[0])} className="mt-2 block w-full text-sm text-muted-foreground" />
+            {screenshot && <p className="mt-2 text-sm font-semibold text-muted-foreground">{screenshot.filename}</p>}
+          </div>
+          <div>
+            <FieldLabel label="Tags" htmlFor="opportunity-tags" />
+            <input id="opportunity-tags" value={tags} onChange={(event) => setTags(event.target.value)} className="mt-2 h-11 w-full rounded-md border border-input px-3 outline-none focus:ring-2 focus:ring-ring" placeholder="robotics, labor gap, reply" />
+          </div>
+          <div>
+            <FieldLabel label="Urgency" htmlFor="opportunity-urgency" />
+            <select id="opportunity-urgency" value={urgency} onChange={(event) => setUrgency(event.target.value as OpportunityUrgency)} className="mt-2 h-11 w-full rounded-md border border-input bg-white px-3 outline-none focus:ring-2 focus:ring-ring">
+              {opportunityUrgencies.map((item) => <option key={item} value={item}>{item}</option>)}
+            </select>
+          </div>
+          <div>
+            <FieldLabel label="Status" htmlFor="opportunity-status" />
+            <select id="opportunity-status" value={status} onChange={(event) => setStatus(event.target.value as OpportunityStatus)} className="mt-2 h-11 w-full rounded-md border border-input bg-white px-3 outline-none focus:ring-2 focus:ring-ring">
+              {opportunityStatuses.map((item) => <option key={item} value={item}>{item}</option>)}
+            </select>
+          </div>
+          <div className="md:col-span-2">
+            <FieldLabel label="Notes" htmlFor="opportunity-notes" />
+            <input id="opportunity-notes" value={notes} onChange={(event) => setNotes(event.target.value)} className="mt-2 h-11 w-full rounded-md border border-input px-3 outline-none focus:ring-2 focus:ring-ring" placeholder="Why did this catch your eye?" />
+          </div>
+        </div>
+        <div className="mt-5 flex flex-wrap items-center justify-between gap-3">
+          <p className="text-sm text-muted-foreground">
+            Save the signal first, then decide whether it becomes a post, reply, reference, or archive item.
+          </p>
+          <div className="flex flex-wrap gap-2">
+            <Button variant="secondary" onClick={createOpportunity}>Save opportunity</Button>
+            <Button onClick={() => analyzeOpportunity()} disabled={isAnalyzing || (!title.trim() && !sourceUrl.trim() && !pastedText.trim() && !notes.trim())}>
+              <Sparkles size={16} /> {isAnalyzing ? "Analyzing..." : "Analyze opportunity"}
+            </Button>
+          </div>
+        </div>
+        {message && (
+          <div className="mt-3 flex flex-wrap items-center gap-2">
+            <p className="text-sm font-semibold text-primary">{message}</p>
+            {message.includes("Ready to Reply") && (
+              <Button size="sm" variant="secondary" onClick={() => setScreen("Ready to Post")}>
+                View in Ready to Reply
               </Button>
-            ))}
+            )}
+          </div>
+        )}
+        {error && <p className="mt-3 text-sm font-semibold text-red-700">{error}</p>}
+      </Card>
+
+      <Card className="p-5">
+        <div className="flex flex-col justify-between gap-3 lg:flex-row lg:items-center">
+          <div>
+            <h3 className="text-lg font-bold">Opportunities</h3>
+            <p className="text-sm text-muted-foreground">Filter the manual listening queue and turn the best openings into posts, replies, or reference material.</p>
+          </div>
+          <div className="grid gap-2 sm:grid-cols-5">
+            <select value={typeFilter} onChange={(event) => setTypeFilter(event.target.value as OpportunityType | "All")} className="h-10 rounded-md border border-input bg-white px-3 text-sm">
+              <option value="All">All types</option>
+              {opportunityTypes.map((item) => <option key={item} value={item}>{item}</option>)}
+            </select>
+            <select value={platformFilter} onChange={(event) => setPlatformFilter(event.target.value as OpportunityPlatform | "All")} className="h-10 rounded-md border border-input bg-white px-3 text-sm">
+              <option value="All">All platforms</option>
+              {opportunityPlatforms.map((item) => <option key={item} value={item}>{item}</option>)}
+            </select>
+            <select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value as OpportunityStatus | "All")} className="h-10 rounded-md border border-input bg-white px-3 text-sm">
+              <option value="All">All statuses</option>
+              {opportunityStatuses.map((item) => <option key={item} value={item}>{item}</option>)}
+            </select>
+            <select value={urgencyFilter} onChange={(event) => setUrgencyFilter(event.target.value as OpportunityUrgency | "All")} className="h-10 rounded-md border border-input bg-white px-3 text-sm">
+              <option value="All">All urgency</option>
+              {opportunityUrgencies.map((item) => <option key={item} value={item}>{item}</option>)}
+            </select>
+            <input value={tagFilter} onChange={(event) => setTagFilter(event.target.value)} className="h-10 rounded-md border border-input px-3 text-sm" placeholder="Tag" />
           </div>
         </div>
-      )}
-    </div>
-  );
-}
-
-function extractPostDetail(content: string, label: string) {
-  const pattern = new RegExp(
-    `${label}:\\s*([\\s\\S]*?)(?=\\n\\n(?:${postDetailLabels.join("|")}):|$)`,
-    "i"
-  );
-  return content.match(pattern)?.[1]?.trim() ?? "";
-}
-
-function displayNameFromPost(post: GeneratedPost) {
-  return post.profileName || "Social Command Center";
-}
-
-function handleFromName(name?: string) {
-  const base = (name || "social command")
-    .toLowerCase()
-    .replace(/https?:\/\//g, "")
-    .replace(/[^a-z0-9]+/g, "")
-    .slice(0, 18);
-  return `@${base || "socialcommand"}`;
-}
-
-function initialsFromName(name?: string) {
-  const words = (name || "SC").split(/\s+/).filter(Boolean);
-  return words.slice(0, 2).map((word) => word[0]?.toUpperCase()).join("") || "SC";
-}
-
-function stripDetailSections(content: string) {
-  const firstDetailIndex = postDetailLabels
-    .map((label) => content.toLowerCase().indexOf(`${label.toLowerCase()}:`))
-    .filter((index) => index >= 0)
-    .sort((a, b) => a - b)[0];
-  return (firstDetailIndex >= 0 ? content.slice(0, firstDetailIndex) : content).trim();
-}
-
-function hasInternalBriefScaffolding(content: string) {
-  return [
-    /^Profile:/im,
-    /^Company Knowledge used:/im,
-    /^Approved examples to learn from:/im,
-    /^Details \/ raw notes:/im,
-    /From .* perspective, make this about/i,
-    /Use the attached media context directly/i,
-    /Do not invent a different topic/i,
-    /^Voice direction:/im
-  ].some((pattern) => pattern.test(content));
-}
-
-function userFacingPostContent(content: string, campaign?: Campaign, post?: GeneratedPost) {
-  if (post?.postCopy && !hasInternalBriefScaffolding(post.postCopy)) {
-    return post.postCopy.trim();
-  }
-
-  const stripped = stripDetailSections(content);
-  if (!hasInternalBriefScaffolding(stripped)) {
-    return stripped;
-  }
-
-  const intent = campaign?.intent || "Here is the practical takeaway.";
-  const details = campaign?.idea;
-  const mediaNote = campaign?.mediaContext?.notes || campaign?.mediaContext?.analysis?.description;
-  const profileName = campaign?.profileName || post?.profileName || "this team";
-  const isCompany =
-    campaign?.profileType === "Company Account" || post?.profileType === "Company Account";
-
-  if (post?.platform === "X") {
-    return [
-      intent,
-      mediaNote && `The useful signal: ${mediaNote}`,
-      "Build from the real workflow, not the polished pitch."
-    ].filter(Boolean).join("\n\n");
-  }
-
-  if (post?.platform === "Instagram") {
-    return [
-      intent,
-      mediaNote && `What this shows: ${mediaNote}`,
-      "The best work happens close to the actual process, where the handoffs and constraints are visible."
-    ].filter(Boolean).join("\n\n");
-  }
-
-  if (post?.platform === "TikTok") {
-    return [
-      `Hook: ${intent}`,
-      "Short script:",
-      `1. Open on the ${mediaNote ? "media" : "moment"}.`,
-      mediaNote && `2. Point out what is happening: ${mediaNote}.`,
-      `3. Explain the takeaway: ${intent}.`,
-      "4. Close with why building close to the workflow matters."
-    ].filter(Boolean).join("\n");
-  }
-
-  return [
-    isCompany
-      ? `${profileName} is sharing this because the best automation work starts with the real workflow.`
-      : "I keep coming back to this: the best product work happens closest to the real workflow.",
-    intent,
-    details && `The context: ${details}`,
-    mediaNote && `The useful signal from the media: ${mediaNote}`,
-    "The takeaway is simple: build where the work actually happens, then let the product earn its way into the process."
-  ].filter(Boolean).join("\n\n");
-}
-
-function threadLines(content: string) {
-  const thread = content.match(/Thread version:\s*([\s\S]*)/i)?.[1] ?? "";
-  return thread
-    .split("\n")
-    .map((line) => line.replace(/^-\s*/, "").trim())
-    .filter(Boolean);
-}
-
-function carouselIdeas(content: string) {
-  const carousel = content.match(/Carousel slide ideas:\s*([\s\S]*?)(?=\n\n(?:CTA|Suggested overlay text):|$)/i)?.[1] ?? "";
-  return carousel
-    .split("\n")
-    .map((line) => line.replace(/^[-\d.\s]+/, "").trim())
-    .filter(Boolean)
-    .slice(0, 5);
-}
-
-function shotListIdeas(content: string) {
-  const shotList = content.match(/Shot list:\s*([\s\S]*?)(?=\n\n(?:Caption|Suggested overlay text|CTA):|$)/i)?.[1] ?? "";
-  return shotList
-    .split("\n")
-    .map((line) => line.replace(/^-\s*/, "").trim())
-    .filter(Boolean)
-    .slice(0, 5);
-}
-
-function hookFromContent(content: string) {
-  return content.match(/Hook:\s*("?[^"\n]+(?:"?))/i)?.[1]?.replaceAll('"', "") ?? "";
-}
-
-function captionFromContent(content: string) {
-  return content.match(/Caption:\s*([\s\S]*?)(?=\n\n(?:CTA|Suggested overlay text|Shot list):|$)/i)?.[1]?.trim() ?? stripDetailSections(content);
-}
-
-function MediaPreviewFrame({
-  campaign,
-  mediaPreviewUrl,
-  className
-}: {
-  campaign: Campaign;
-  mediaPreviewUrl: string;
-  className?: string;
-}) {
-  const type = campaign.mediaContext?.type;
-  const previewUrl = mediaPreviewUrl || campaign.mediaContext?.publicUrl || "";
-
-  if (previewUrl && type === "image") {
-    return (
-      // eslint-disable-next-line @next/next/no-img-element
-      <img
-        src={previewUrl}
-        alt={campaign.mediaContext?.filename ?? "Uploaded media"}
-        className={cn("h-full w-full object-cover", className)}
-      />
-    );
-  }
-
-  if (previewUrl && type === "video") {
-    return (
-      <video
-        src={previewUrl}
-        controls
-        className={cn("h-full w-full bg-black object-cover", className)}
-      />
-    );
-  }
-
-  if (previewUrl && type === "audio") {
-    return (
-      <div className={cn("flex h-full w-full flex-col justify-center bg-white p-4", className)}>
-        <p className="mb-3 text-sm font-bold">{campaign.mediaContext?.filename}</p>
-        <audio src={previewUrl} controls className="w-full" />
-      </div>
-    );
-  }
-
-  if (campaign.mediaContext?.filename) {
-    return (
-      <div className={cn("flex h-full min-h-52 w-full items-center justify-center bg-muted p-6 text-center text-sm font-semibold text-muted-foreground", className)}>
-        Media preview unavailable after refresh.
-      </div>
-    );
-  }
-
-  return (
-    <div className={cn("flex h-full min-h-52 w-full items-center justify-center bg-muted p-6 text-center text-sm font-semibold text-muted-foreground", className)}>
-      No media attached.
-    </div>
-  );
-}
-
-function PlatformPreview({
-  post,
-  campaign,
-  mediaPreviewUrl
-}: {
-  post: GeneratedPost;
-  campaign: Campaign;
-  mediaPreviewUrl: string;
-}) {
-  if (post.platform === "LinkedIn") {
-    return <LinkedInPreview post={post} campaign={campaign} mediaPreviewUrl={mediaPreviewUrl} />;
-  }
-
-  if (post.platform === "X") {
-    return <XPreview post={post} campaign={campaign} mediaPreviewUrl={mediaPreviewUrl} />;
-  }
-
-  if (post.platform === "Instagram") {
-    return <InstagramPreview post={post} campaign={campaign} mediaPreviewUrl={mediaPreviewUrl} />;
-  }
-
-  return <TikTokPreview post={post} campaign={campaign} mediaPreviewUrl={mediaPreviewUrl} />;
-}
-
-function Avatar({ name }: { name?: string }) {
-  return (
-    <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-primary text-sm font-bold text-primary-foreground">
-      {initialsFromName(name)}
-    </div>
-  );
-}
-
-function LinkedInPreview({
-  post,
-  campaign,
-  mediaPreviewUrl
-}: {
-  post: GeneratedPost;
-  campaign: Campaign;
-  mediaPreviewUrl: string;
-}) {
-  return (
-    <div className="mx-auto max-w-2xl rounded-lg border border-border bg-white shadow-sm">
-      <div className="flex gap-3 p-4">
-        <Avatar name={displayNameFromPost(post)} />
-        <div className="min-w-0">
-          <p className="font-bold">{displayNameFromPost(post)}</p>
-          <p className="text-sm text-muted-foreground">{post.profileRole || post.profileType || "Company"}</p>
-          <p className="text-xs text-muted-foreground">Now</p>
-        </div>
-      </div>
-      <div className="whitespace-pre-wrap px-4 pb-4 text-sm leading-6">
-        {userFacingPostContent(post.content, campaign, post)}
-      </div>
-      {post.mediaUsed && (
-        <div className="border-y border-border">
-          <MediaPreviewFrame campaign={campaign} mediaPreviewUrl={mediaPreviewUrl} className="max-h-[420px]" />
-        </div>
-      )}
-      <div className="grid grid-cols-4 gap-2 p-3 text-center text-sm font-semibold text-muted-foreground">
-        <span>Like</span>
-        <span>Comment</span>
-        <span>Repost</span>
-        <span>Send</span>
-      </div>
-    </div>
-  );
-}
-
-function XPreview({
-  post,
-  campaign,
-  mediaPreviewUrl
-}: {
-  post: GeneratedPost;
-  campaign: Campaign;
-  mediaPreviewUrl: string;
-}) {
-  const mainText = userFacingPostContent(post.content, campaign, post).replace(/Thread version:[\s\S]*/i, "").trim();
-  const thread = threadLines(post.content);
-
-  return (
-    <div className="mx-auto max-w-xl rounded-lg border border-border bg-white p-4 shadow-sm">
-      <div className="flex gap-3">
-        <Avatar name={displayNameFromPost(post)} />
-        <div className="min-w-0 flex-1">
-          <div className="flex flex-wrap items-center gap-2">
-            <p className="font-bold">{displayNameFromPost(post)}</p>
-            <p className="text-sm text-muted-foreground">{handleFromName(displayNameFromPost(post))} · Now</p>
-          </div>
-          <p className="mt-2 whitespace-pre-wrap text-[15px] leading-6">{mainText}</p>
-          {post.mediaUsed && (
-            <div className="mt-3 overflow-hidden rounded-xl border border-border">
-              <MediaPreviewFrame campaign={campaign} mediaPreviewUrl={mediaPreviewUrl} className="max-h-80" />
+        <div className="mt-4 grid gap-3">
+          {filteredOpportunities.length === 0 ? (
+            <div className="rounded-md border border-dashed border-border bg-white p-5 text-sm text-muted-foreground">
+              Capture a trend, mention, reply opening, customer note, or article and it will appear here.
             </div>
-          )}
-          {thread.length > 0 && (
-            <div className="mt-4 border-l-2 border-border pl-4">
-              {thread.map((line, index) => (
-                <p key={line} className="mb-3 text-sm leading-6">
-                  {index + 2}. {line}
-                </p>
+          ) : filteredOpportunities.map((opportunity) => (
+            <div key={opportunity.id} className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
+              <div className="flex flex-col justify-between gap-3 lg:flex-row lg:items-start">
+                <button type="button" onClick={() => setSelectedOpportunityId(opportunity.id)} className="min-w-0 text-left">
+                  <div className="flex flex-wrap gap-2">
+                    <Pill>{opportunity.opportunityType}</Pill>
+                    <Pill>{opportunity.platform}</Pill>
+                    <Pill>{opportunity.urgency}</Pill>
+                    <Pill>{opportunity.status}</Pill>
+                  </div>
+                  <p className="mt-2 font-bold">{opportunity.title}</p>
+                  {opportunity.sourceUrl && (
+                    <p className="mt-1 truncate text-xs font-semibold text-primary">{opportunity.sourceUrl}</p>
+                  )}
+                  <p className="mt-1 line-clamp-2 text-sm text-muted-foreground">
+                    {opportunity.analysis?.whyItMatters || opportunity.pastedText || opportunity.notes || "No summary yet."}
+                  </p>
+                  {opportunity.analysis?.suggestedConduitAngle && (
+                    <p className="mt-2 rounded-md border border-teal-100 bg-teal-50 px-3 py-2 text-sm font-semibold text-teal-900">
+                      Angle: {opportunity.analysis.suggestedConduitAngle}
+                    </p>
+                  )}
+                  <p className="mt-2 rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-sm font-semibold text-slate-700">
+                    {opportunityNextStep(opportunity)}
+                  </p>
+                  {opportunity.tags.length > 0 && <p className="mt-2 text-xs font-semibold text-muted-foreground">{opportunity.tags.join(", ")}</p>}
+                </button>
+                <div className="flex flex-wrap gap-2">
+                  <Button size="sm" variant="secondary" onClick={() => analyzeOpportunity(opportunity)} disabled={isAnalyzing}>
+                    Analyze
+                  </Button>
+                  <Button size="sm" variant="secondary" onClick={() => openReplyFlow(opportunity)}>
+                    Draft reply
+                  </Button>
+                  <Button size="sm" variant="secondary" onClick={() => createPostFromOpportunity(opportunity)}>
+                    Create post
+                  </Button>
+                  <Button size="sm" variant="danger" onClick={() => updateOpportunity(opportunity, { status: "Archived" })}>
+                    Archive
+                  </Button>
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+      </Card>
+
+      {replyOpportunity && (
+        <Card className="p-5">
+          <div className="flex flex-col justify-between gap-3 lg:flex-row lg:items-start">
+            <div>
+              <p className="text-xs font-extrabold uppercase tracking-wide text-primary">Reply drafting</p>
+              <h3 className="mt-1 text-xl font-bold">{replyOpportunity.title}</h3>
+              <p className="mt-1 text-sm text-muted-foreground">
+                Draft a reply grounded in Conduit knowledge and brand rules. Nothing posts automatically.
+              </p>
+            </div>
+            <Button variant="ghost" onClick={() => setReplyOpportunityId("")}>Close</Button>
+          </div>
+          <div className="mt-4 grid gap-4 lg:grid-cols-2">
+            <div>
+              <FieldLabel label="Comment, mention, post, question, or shoutout to reply to" htmlFor="reply-context" />
+              <textarea
+                id="reply-context"
+                value={replyContext}
+                onChange={(event) => setReplyContext(event.target.value)}
+                className="mt-2 min-h-32 w-full rounded-md border border-input bg-white p-3 text-sm leading-6 outline-none focus:ring-2 focus:ring-ring"
+                placeholder="Paste the exact comment, mention, competitor claim, customer shoutout, or question."
+              />
+            </div>
+            <div className="grid gap-3">
+              <div>
+                <FieldLabel label="Posting account" htmlFor="reply-profile" />
+                <select
+                  id="reply-profile"
+                  value={activeReplyProfileId}
+                  onChange={(event) => setReplyProfileId(event.target.value)}
+                  className="mt-2 h-11 w-full rounded-md border border-input bg-white px-3 outline-none focus:ring-2 focus:ring-ring"
+                >
+                  {profiles.map((profile) => (
+                    <option key={profile.id} value={profile.id}>{profile.name} · {profile.type}</option>
+                  ))}
+                </select>
+              </div>
+              <AnalysisBlock
+                label="Opportunity context"
+                value={replyOpportunity.analysis?.suggestedConduitAngle || replyOpportunity.notes || replyOpportunity.sourceUrl || "No analyzed angle yet."}
+              />
+              <Button onClick={() => draftReply(replyOpportunity)} disabled={isDraftingReply || (!replyContext.trim() && !replyOpportunity.pastedText && !replyOpportunity.notes)}>
+                <Sparkles size={16} /> {isDraftingReply ? "Drafting..." : "Draft reply"}
+              </Button>
+            </div>
+          </div>
+          {(replyOpportunity.replyDrafts ?? []).length > 0 && (
+            <div className="mt-5 grid gap-3">
+              {(replyOpportunity.replyDrafts ?? []).map((reply) => (
+                <ReplyDraftCard
+                  key={reply.id}
+                  reply={reply}
+                  onCopy={copyReply}
+                  onApprove={(selectedKey) => approveReply(replyOpportunity, reply, selectedKey)}
+                  onRegenerate={(selectedKey, selectedText) => draftReply(replyOpportunity, {
+                    instruction: "Regenerate this reply. Keep it concise, specific, and grounded in Conduit Company Knowledge. Do not copy the original wording.",
+                    contextOverride: selectedText || replyContext || replyOpportunity.pastedText || replyOpportunity.notes,
+                    existingReply: selectedText
+                  })}
+                  onMakeMoreConduit={(selectedKey, selectedText) => draftReply(replyOpportunity, {
+                    instruction: "Make this reply more Conduit: more direct, more specific to industrial operations, less hypey, less corporate, and safer on claims.",
+                    contextOverride: selectedText || replyContext || replyOpportunity.pastedText || replyOpportunity.notes,
+                    existingReply: selectedText
+                  })}
+                  onReviewUpdate={(review) => updateReplyReview(replyOpportunity, reply, review)}
+                  onRegenerateFromFeedback={(feedback, selectedText) => draftReply(replyOpportunity, {
+                    instruction: `Regenerate this reply from founder/team feedback: ${feedback}`,
+                    contextOverride: selectedText || replyContext || replyOpportunity.pastedText || replyOpportunity.notes,
+                    existingReply: selectedText
+                  })}
+                  onArchive={() => archiveReply(replyOpportunity, reply)}
+                  copied={copyState === reply.id}
+                  isWorking={isDraftingReply}
+                />
               ))}
             </div>
           )}
-          <div className="mt-3 flex justify-between text-sm font-semibold text-muted-foreground">
-            <span>{mainText.length} chars</span>
-            <span>Reply</span>
-            <span>Repost</span>
-            <span>Like</span>
-            <span>Share</span>
+        </Card>
+      )}
+
+      {selectedOpportunity && (
+        <Card className="p-5">
+          <div className="flex flex-col justify-between gap-3 lg:flex-row lg:items-start">
+            <div>
+              <p className="text-xs font-extrabold uppercase tracking-wide text-primary">Opportunity details</p>
+              <h3 className="mt-1 text-xl font-bold">{selectedOpportunity.title}</h3>
+              <p className="mt-1 text-sm text-muted-foreground">Created {formatShortDateTime(selectedOpportunity.createdAt)}</p>
+            </div>
+            <Button variant="ghost" onClick={() => setSelectedOpportunityId("")}>Close</Button>
           </div>
-        </div>
-      </div>
+          <div className="mt-4 grid gap-3 md:grid-cols-2">
+            <AnalysisBlock label="Overview" value={`${selectedOpportunity.opportunityType} · ${selectedOpportunity.platform} · ${selectedOpportunity.urgency} urgency · ${selectedOpportunity.status}`} />
+            <AnalysisBlock label="Source" value={selectedOpportunity.sourceUrl || "No URL saved."} />
+            <AnalysisBlock label="AI analysis" value={selectedOpportunity.analysis ? `${selectedOpportunity.analysis.whyItMatters}\n\nAngle: ${selectedOpportunity.analysis.suggestedConduitAngle}\nRecommendation: ${selectedOpportunity.analysis.recommendation}` : "Not analyzed yet."} />
+            <AnalysisBlock label="Drafts created" value={selectedOpportunity.relatedCampaignId ? `Content brief: ${selectedOpportunity.relatedCampaignId}` : "No drafts created yet."} />
+            <AnalysisBlock label="Related posts" value={(selectedOpportunity.relatedPostIds ?? []).join(", ") || "No related posts yet."} />
+            <AnalysisBlock label="Notes" value={selectedOpportunity.notes || selectedOpportunity.pastedText || "No notes saved."} />
+          </div>
+          <div className="mt-4 flex flex-wrap gap-2">
+            <Button onClick={() => createPostFromOpportunity(selectedOpportunity)}>Create post from opportunity</Button>
+            <Button variant="secondary" onClick={() => openReplyFlow(selectedOpportunity)}>Draft reply</Button>
+            <Button variant="secondary" onClick={() => saveToCompanyKnowledge(selectedOpportunity)}>Save to Company Knowledge</Button>
+            <Button variant="secondary" onClick={() => saveAsInspirationProfile(selectedOpportunity)}>Save as Inspiration / Reference</Button>
+          </div>
+        </Card>
+      )}
     </div>
   );
 }
 
-function InstagramPreview({
-  post,
-  campaign,
-  mediaPreviewUrl
+function ReplyDraftCard({
+  reply,
+  onCopy,
+  onApprove,
+  onRegenerate,
+  onMakeMoreConduit,
+  onReviewUpdate,
+  onRegenerateFromFeedback,
+  onArchive,
+  isWorking = false,
+  copied
 }: {
-  post: GeneratedPost;
-  campaign: Campaign;
-  mediaPreviewUrl: string;
+  reply: OpportunityReplyDraft;
+  onCopy: (text: string, id: string) => void;
+  onApprove: (selectedKey: OpportunityReplyDraft["selectedReply"]) => void;
+  onRegenerate: (selectedKey: OpportunityReplyDraft["selectedReply"], selectedText: string) => void;
+  onMakeMoreConduit: (selectedKey: OpportunityReplyDraft["selectedReply"], selectedText: string) => void;
+  onReviewUpdate: (review: ReviewMetadata) => void;
+  onRegenerateFromFeedback: (feedback: string, selectedText: string) => void;
+  onArchive: () => void;
+  isWorking?: boolean;
+  copied: boolean;
 }) {
-  const displayContent = userFacingPostContent(post.content, campaign, post);
-  const overlay = post.overlayText || extractPostDetail(post.content, "Suggested overlay text");
-  const cta = post.cta || extractPostDetail(post.content, "CTA");
-  const slides = post.carouselIdeas?.length ? post.carouselIdeas : carouselIdeas(post.content);
-
-  return (
-    <div className="mx-auto max-w-md overflow-hidden rounded-lg border border-border bg-white shadow-sm">
-      <div className="flex items-center gap-3 p-3">
-        <Avatar name={displayNameFromPost(post)} />
-        <p className="font-bold">{handleFromName(displayNameFromPost(post)).replace("@", "")}</p>
-      </div>
-      <div className="relative aspect-square bg-muted">
-        <MediaPreviewFrame campaign={campaign} mediaPreviewUrl={mediaPreviewUrl} />
-        {overlay && (
-          <div className="absolute left-4 top-4 max-w-[80%] rounded-md bg-black/70 px-3 py-2 text-sm font-bold text-white">
-            {overlay}
-          </div>
-        )}
-      </div>
-      <div className="flex justify-between p-3 text-sm font-semibold">
-        <div className="flex gap-4">
-          <Heart size={18} /> <MessageCircle size={18} /> <Send size={18} />
-        </div>
-        <span>Save</span>
-      </div>
-      <div className="px-3 pb-4">
-        <p className="whitespace-pre-wrap text-sm leading-6">{captionFromContent(displayContent)}</p>
-        {slides.length > 0 && (
-          <div className="mt-3 rounded-md bg-muted p-3">
-            <p className="text-xs font-bold uppercase text-muted-foreground">Carousel ideas</p>
-            <ul className="mt-2 list-inside list-decimal text-sm leading-6">
-              {slides.map((slide) => <li key={slide}>{slide}</li>)}
-            </ul>
-          </div>
-        )}
-        {cta && <p className="mt-3 text-sm font-bold">CTA: {cta}</p>}
-      </div>
-    </div>
+  type ReplyOptionKey = NonNullable<OpportunityReplyDraft["selectedReply"]>;
+  const [selectedKey, setSelectedKey] = useState<NonNullable<OpportunityReplyDraft["selectedReply"]>>(
+    reply.selectedReply || "shortReply"
   );
-}
-
-function TikTokPreview({
-  post,
-  campaign,
-  mediaPreviewUrl
-}: {
-  post: GeneratedPost;
-  campaign: Campaign;
-  mediaPreviewUrl: string;
-}) {
-  const displayContent = userFacingPostContent(post.content, campaign, post);
-  const hook = hookFromContent(displayContent) || post.overlayText || extractPostDetail(post.content, "Suggested overlay text");
-  const shots = post.shotList?.length ? post.shotList : shotListIdeas(post.content);
-  const cta = post.cta || extractPostDetail(post.content, "CTA");
+  const allOptions: Array<{ key: ReplyOptionKey; label: string; value?: string }> = [
+    { key: "shortReply", label: "Short reply", value: reply.shortReply },
+    { key: "warmerReply", label: "Slightly warmer", value: reply.warmerReply },
+    { key: "founderLedReply", label: "More founder-led", value: reply.founderLedReply },
+    { key: "longerReply", label: "Optional longer", value: reply.longerReply }
+  ];
+  const options = allOptions.filter((item): item is { key: ReplyOptionKey; label: string; value: string } => Boolean(item.value));
+  const selectedText = options.find((item) => item.key === selectedKey)?.value || reply.shortReply;
+  const replyReview = reviewWithDefault(reply.review, reply.status === "Approved" ? "Approved" : "Draft");
 
   return (
-    <div className="grid gap-4 lg:grid-cols-[320px_1fr]">
-      <div className="mx-auto w-full max-w-[320px] overflow-hidden rounded-[28px] border-8 border-slate-900 bg-slate-950 shadow-xl">
-        <div className="relative aspect-[9/16] bg-slate-900 text-white">
-          <MediaPreviewFrame campaign={campaign} mediaPreviewUrl={mediaPreviewUrl} className="opacity-80" />
-          <div className="absolute left-4 right-16 top-6 rounded-lg bg-black/55 p-3 text-lg font-bold leading-6">
-            {hook || "New post idea"}
+    <div className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
+      <div className="flex flex-col justify-between gap-3 lg:flex-row lg:items-start">
+        <div>
+          <div className="flex flex-wrap gap-2">
+            <Pill>{reply.recommendedPlatform}</Pill>
+            <Pill>{reply.status}</Pill>
+            {reply.brandSafetyNotes.length > 0 ? <Pill>Safety: Needs review</Pill> : <Pill>Safety: Safe</Pill>}
           </div>
-          <div className="absolute bottom-5 left-4 right-16">
-            <p className="font-bold">{handleFromName(displayNameFromPost(post))}</p>
-            <p className="mt-2 line-clamp-4 text-sm leading-5">{captionFromContent(displayContent)}</p>
-          </div>
-          <div className="absolute bottom-8 right-3 grid gap-4 text-center text-xs font-bold">
-            <span>Like</span>
-            <span>Comment</span>
-            <span>Share</span>
-          </div>
+          <p className="mt-3 text-sm font-semibold text-muted-foreground">Choose a reply option</p>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          <Button size="sm" variant="secondary" onClick={() => onCopy(selectedText, reply.id)}>
+            <Clipboard size={14} /> {copied ? "Copied" : "Copy reply"}
+          </Button>
+          <Button size="sm" variant="secondary" onClick={() => onRegenerate(selectedKey, selectedText)} disabled={isWorking || reply.status === "Archived"}>
+            Regenerate reply
+          </Button>
+          <Button size="sm" variant="secondary" onClick={() => onMakeMoreConduit(selectedKey, selectedText)} disabled={isWorking || reply.status === "Archived"}>
+            Make more Conduit
+          </Button>
+          <Button size="sm" onClick={() => onApprove(selectedKey)} disabled={reply.status === "Approved" || reply.status === "Archived"}>
+            Approve reply
+          </Button>
+          <Button size="sm" variant="danger" onClick={onArchive} disabled={reply.status === "Archived"}>
+            Archive
+          </Button>
         </div>
       </div>
-      <div className="rounded-lg border border-border bg-white p-4">
-        <p className="text-sm font-bold uppercase text-muted-foreground">Script and shot list</p>
-        <p className="mt-3 whitespace-pre-wrap text-sm leading-6">{displayContent}</p>
-        {shots.length > 0 && (
-          <div className="mt-4 rounded-md bg-muted p-3">
-            <p className="text-xs font-bold uppercase text-muted-foreground">Shot list</p>
-            <ul className="mt-2 list-inside list-disc text-sm leading-6">
-              {shots.map((shot) => <li key={shot}>{shot}</li>)}
-            </ul>
-          </div>
-        )}
-        {cta && <p className="mt-4 text-sm font-bold">CTA: {cta}</p>}
+      <div className="mt-4 grid gap-3 lg:grid-cols-2">
+        <div className="flex flex-col gap-2">
+          {options.map((option) => (
+            <button
+              key={option.key}
+              type="button"
+              onClick={() => setSelectedKey(option.key)}
+              className={cn(
+                "rounded-md border px-3 py-2 text-left text-sm font-bold",
+                selectedKey === option.key
+                  ? "border-primary bg-primary text-primary-foreground"
+                  : "border-slate-200 bg-slate-50 text-slate-700 hover:bg-slate-100"
+              )}
+            >
+              {option.label}
+            </button>
+          ))}
+        </div>
+        <div className="rounded-lg border border-slate-200 bg-slate-50 p-4">
+          <p className="whitespace-pre-wrap text-sm leading-6">{selectedText}</p>
+        </div>
       </div>
+      <div className="mt-4 grid gap-3 md:grid-cols-2">
+        <AnalysisBlock label="Tone notes" value={reply.toneNotes || "No tone notes saved."} />
+        <AnalysisBlock
+          label="Brand Safety / Claim Check"
+          value={reply.brandSafetyNotes.length > 0 ? reply.brandSafetyNotes.join("\n") : "No obvious reply risks found."}
+        />
+      </div>
+      <ReviewWorkflowPanel
+        className="mt-4"
+        review={replyReview}
+        contentKind="Reply"
+        onChange={onReviewUpdate}
+        onRegenerateFromFeedback={(feedback) => onRegenerateFromFeedback(feedback, selectedText)}
+      />
     </div>
   );
 }
@@ -11559,6 +7315,7 @@ function PostQueue({
   campaigns,
   profiles,
   updateQueueItem,
+  deleteQueueItem,
   setScreen,
   mediaPreviewUrl,
   queueDebugMessage,
@@ -11567,12 +7324,19 @@ function PostQueue({
   activeCampaignComplete,
   startNewPost,
   repurposeCampaign,
-  instagramSandboxConfigured
+  instagramSandboxConnection,
+  recordActivity,
+  reviewLinks,
+  reviewFeedback,
+  resolveManagerFeedback,
+  createReviewLink,
+  disableReviewLink
 }: {
   queue: PostQueueItem[];
   campaigns: Campaign[];
   profiles: Profile[];
-  updateQueueItem: (id: string, updates: Partial<PostQueueItem>) => void;
+  updateQueueItem: (id: string, updates: Partial<PostQueueItem>, options?: { silentActivity?: boolean }) => void;
+  deleteQueueItem: (id: string) => void;
   setScreen: (screen: Screen) => void;
   mediaPreviewUrl: string;
   queueDebugMessage: string;
@@ -11581,141 +7345,160 @@ function PostQueue({
   activeCampaignComplete: boolean;
   startNewPost: () => void;
   repurposeCampaign: (campaign: Campaign) => void;
-  instagramSandboxConfigured: boolean;
+  instagramSandboxConnection?: SocialConnection;
+  recordActivity: (input: Omit<ActivityLogItem, "id" | "createdAt" | "userEmail" | "workspaceName">) => ActivityLogItem;
+  reviewLinks: ReviewLink[];
+  reviewFeedback: ReviewFeedback[];
+  resolveManagerFeedback: (feedbackId: string) => void;
+  createReviewLink: (input: {
+    scopeType: ReviewLinkScopeType;
+    scope: ReviewLink["scope"];
+    permissionLevel: ReviewPermissionLevel;
+    expiresAt?: string;
+  }) => ReviewLink;
+  disableReviewLink: (id: string) => void;
 }) {
+  const [activeTab, setActiveTab] = useState<QueueExecutionTab>("Active");
+  const [contentTypeFilter, setContentTypeFilter] = useState<"All" | "Post" | "Reply">("All");
   const [platformFilter, setPlatformFilter] = useState<Platform | "All">("All");
   const [profileFilter, setProfileFilter] = useState("All");
-  const [statusFilter, setStatusFilter] = useState<QueueStatus | "All">("All");
   const [campaignFilter, setCampaignFilter] = useState("All");
   const [showQueueDebug, setShowQueueDebug] = useState(false);
-  const filteredQueue = queue.filter((item) => {
+  const [queueMessage, setQueueMessage] = useState("");
+
+  const visibleQueue = queue.filter((item) => {
+    const matchesTab = queueItemMatchesExecutionTab(item, activeTab);
+    const matchesContentType = contentTypeFilter === "All" || queueContentType(item) === contentTypeFilter;
     const matchesPlatform = platformFilter === "All" || item.platform === platformFilter;
     const matchesProfile = profileFilter === "All" || item.profileId === profileFilter;
-    const matchesStatus = statusFilter === "All" || normalizeQueueStatus(item.status) === statusFilter;
     const matchesCampaign = campaignFilter === "All" || item.campaignId === campaignFilter;
-    return matchesPlatform && matchesProfile && matchesStatus && matchesCampaign;
+    return matchesTab && matchesContentType && matchesPlatform && matchesProfile && matchesCampaign;
   });
-  const statusCounts = queueStatuses.map((status) => ({
-    status,
-    count: queue.filter((item) => normalizeQueueStatus(item.status) === status).length
+
+  const tabCounts = queueExecutionTabs.map((tab) => ({
+    tab,
+    count: queue.filter((item) => queueItemMatchesExecutionTab(item, tab)).length
   }));
-  const activeFilters =
-    platformFilter !== "All" ||
-    profileFilter !== "All" ||
-    statusFilter !== "All" ||
-    campaignFilter !== "All";
-  const statusSections = queueStatuses
-    .map((status) => ({
-      status,
-      items: filteredQueue.filter((item) => normalizeQueueStatus(item.status) === status)
-    }))
-    .filter((section) => section.items.length > 0);
+  const shareCandidates = visibleQueue.filter((item) => activeTab !== "Archived" && normalizeQueueStatus(item.status) !== "Archived");
+
+  function updateAndMessage(id: string, updates: Partial<PostQueueItem>, message: string) {
+    updateQueueItem(id, updates);
+    setQueueMessage(message);
+  }
+
+  function clearCompletedFromQueue() {
+    const completedItems = queue.filter((item) => queueItemMatchesExecutionTab(item, "Completed"));
+    completedItems.forEach((item) => updateQueueItem(item.id, { hiddenFromQueue: true }, { silentActivity: true }));
+    recordActivity({
+      actionType: "Completed queue cleared",
+      objectType: "Queue",
+      title: "Completed items hidden from queue",
+      summary: `${completedItems.length} completed item${completedItems.length === 1 ? "" : "s"} hidden from Ready to Post. Content Library records were kept.`,
+      destination: "Ready to Post",
+      status: "success",
+      undo: {
+        type: "queue-clear-completed-restore",
+        label: "Undo clear",
+        payload: { items: completedItems }
+      }
+    });
+    setQueueMessage("Completed items were hidden from this queue. They remain in Content Library and Analytics.");
+  }
 
   return (
     <div className="space-y-5">
       <Card className="p-5">
-        <div className="flex flex-col justify-between gap-3 md:flex-row md:items-start">
+        <div className="flex flex-col justify-between gap-4 lg:flex-row lg:items-start">
           <div>
-            <h3 className="text-lg font-bold">Ready to Post</h3>
-            <p className="mt-1 text-sm leading-6 text-muted-foreground">
-              Approved posts live here until you copy, schedule, mark posted, or archive them.
+            <p className="text-xs font-extrabold uppercase tracking-wide text-primary">Execution queue</p>
+            <h3 className="mt-1 text-2xl font-bold">Ready to Post / Ready to Reply</h3>
+            <p className="mt-1 max-w-3xl text-sm leading-6 text-muted-foreground">
+              Copy, schedule, manually publish, or mark approved posts and replies as done. Completed items stay in Content Library.
             </p>
           </div>
-          <Button variant="secondary" onClick={() => setScreen("Review Drafts")}>
-            Back to results
-          </Button>
+          <Button variant="secondary" onClick={() => setScreen("Review Drafts")}>Review drafts</Button>
         </div>
-        <div className="mt-5 grid gap-3 md:grid-cols-2 lg:grid-cols-4">
+
+        <div className="mt-5 flex flex-wrap gap-2">
+          {tabCounts.map((item) => (
+            <Button
+              key={item.tab}
+              variant={activeTab === item.tab ? "primary" : "secondary"}
+              onClick={() => setActiveTab(item.tab)}
+            >
+              {item.tab} <span className="ml-1 rounded bg-white/20 px-1.5 text-xs">{item.count}</span>
+            </Button>
+          ))}
+        </div>
+
+        <div className="mt-5 grid gap-3 lg:grid-cols-4">
+          <QueueFilter label="Content">
+            <select value={contentTypeFilter} onChange={(event) => setContentTypeFilter(event.target.value as "All" | "Post" | "Reply")} className="mt-2 h-10 w-full rounded-md border border-input bg-white px-3 text-sm outline-none focus:ring-2 focus:ring-ring">
+              <option value="All">All</option>
+              <option value="Post">Posts</option>
+              <option value="Reply">Replies</option>
+            </select>
+          </QueueFilter>
           <QueueFilter label="Platform">
-            <p className="mt-1 text-xs font-medium text-muted-foreground">
-              All platforms shows every queued post. Pick one platform to narrow the queue.
-            </p>
-            <select
-              value={platformFilter}
-              onChange={(event) => setPlatformFilter(event.target.value as Platform | "All")}
-              className="mt-2 h-10 w-full rounded-md border border-input bg-white px-3 text-sm outline-none focus:ring-2 focus:ring-ring"
-            >
+            <select value={platformFilter} onChange={(event) => setPlatformFilter(event.target.value as Platform | "All")} className="mt-2 h-10 w-full rounded-md border border-input bg-white px-3 text-sm outline-none focus:ring-2 focus:ring-ring">
               <option value="All">All platforms</option>
-              {platforms.map((platform) => (
-                <option key={platform} value={platform}>{platform}</option>
-              ))}
+              {platforms.map((platform) => <option key={platform} value={platform}>{platform}</option>)}
             </select>
           </QueueFilter>
-          <QueueFilter label="Profile">
-            <select
-              value={profileFilter}
-              onChange={(event) => setProfileFilter(event.target.value)}
-              className="mt-2 h-10 w-full rounded-md border border-input bg-white px-3 text-sm outline-none focus:ring-2 focus:ring-ring"
-            >
+          <QueueFilter label="Posting account">
+            <select value={profileFilter} onChange={(event) => setProfileFilter(event.target.value)} className="mt-2 h-10 w-full rounded-md border border-input bg-white px-3 text-sm outline-none focus:ring-2 focus:ring-ring">
               <option value="All">All profiles</option>
-              {profiles.map((profile) => (
-                <option key={profile.id} value={profile.id}>{profile.name}</option>
-              ))}
-            </select>
-          </QueueFilter>
-          <QueueFilter label="Status">
-            <select
-              value={statusFilter}
-              onChange={(event) => setStatusFilter(event.target.value as QueueStatus | "All")}
-              className="mt-2 h-10 w-full rounded-md border border-input bg-white px-3 text-sm outline-none focus:ring-2 focus:ring-ring"
-            >
-              <option value="All">All statuses</option>
-              {queueStatuses.map((status) => (
-                <option key={status} value={status}>{status}</option>
-              ))}
+              {profiles.map((profile) => <option key={profile.id} value={profile.id}>{profile.name}</option>)}
             </select>
           </QueueFilter>
           <QueueFilter label="Brief">
-            <select
-              value={campaignFilter}
-              onChange={(event) => setCampaignFilter(event.target.value)}
-              className="mt-2 h-10 w-full rounded-md border border-input bg-white px-3 text-sm outline-none focus:ring-2 focus:ring-ring"
-            >
+            <select value={campaignFilter} onChange={(event) => setCampaignFilter(event.target.value)} className="mt-2 h-10 w-full rounded-md border border-input bg-white px-3 text-sm outline-none focus:ring-2 focus:ring-ring">
               <option value="All">All briefs</option>
-              {campaigns.map((campaign) => (
-                <option key={campaign.id} value={campaign.id}>{campaign.name}</option>
-              ))}
+              {campaigns.map((campaign) => <option key={campaign.id} value={campaign.id}>{campaign.name}</option>)}
             </select>
           </QueueFilter>
         </div>
-        <div className="mt-4 flex flex-wrap gap-2">
-          {statusCounts.map((item) => (
-            <span key={item.status} className="rounded-md bg-muted px-3 py-2 text-sm font-semibold text-muted-foreground">
-              {item.status}: {item.count} posts
-            </span>
-          ))}
-        </div>
-        <div className="mt-4 rounded-md border border-border bg-muted p-3 text-sm text-muted-foreground">
-          <button
-            type="button"
-            onClick={() => setShowQueueDebug((current) => !current)}
-            className="font-semibold text-foreground hover:text-primary"
-          >
-            {showQueueDebug ? "Hide Debug details" : "Debug details"}
+
+        <div className="mt-4 rounded-md border border-border bg-muted/60 p-3 text-sm text-muted-foreground">
+          <button type="button" onClick={() => setShowQueueDebug((current) => !current)} className="font-semibold text-foreground hover:text-primary">
+            {showQueueDebug ? "Hide developer diagnostics" : "Developer diagnostics"}
           </button>
-            {showQueueDebug && (
+          {showQueueDebug && (
             <div className="mt-2 leading-6">
-              <p>{queue.length} total loaded · {filteredQueue.length} visible after filters · {storageMode === "supabase" ? "Shared data connected" : "Local mode"}</p>
+              <p>{queue.length} total loaded · {visibleQueue.length} visible · {storageMode === "supabase" ? "Shared data connected" : "Local mode"}</p>
               {queueDebugMessage && <p>{queueDebugMessage}</p>}
+              {instagramSandboxConnection?.status && <p>Instagram sandbox: {instagramSandboxConnection.status}</p>}
             </div>
           )}
         </div>
       </Card>
+
+      <ReviewLinkSharePanel
+        label="Share the execution queue with a manager for comments, suggested edits, or approval."
+        candidateItems={shareCandidates}
+        reviewLinks={reviewLinks}
+        defaultScopeType={activeTab === "Scheduled" ? "Scheduled content only" : "Ready to Post only"}
+        createReviewLink={createReviewLink}
+        disableReviewLink={disableReviewLink}
+        storageMode={storageMode}
+      />
+
+      {queueMessage && (
+        <Card className="border-teal-200 bg-teal-50 p-4 text-sm font-semibold text-teal-950">
+          {queueMessage}
+        </Card>
+      )}
 
       {activeCampaignComplete && activeCampaign && (
         <Card className="border-teal-200 bg-teal-50 p-5">
           <div className="flex flex-col justify-between gap-3 lg:flex-row lg:items-center">
             <div>
               <p className="font-bold text-teal-900">Brief complete. Create a new post or repurpose this content.</p>
-              <p className="mt-1 text-sm leading-6 text-teal-900">
-                Posted and archived items stay saved in Analytics and Content Library.
-              </p>
+              <p className="mt-1 text-sm leading-6 text-teal-900">Posted and archived items stay saved in Analytics and Content Library.</p>
             </div>
             <div className="flex flex-wrap gap-2">
               <Button onClick={startNewPost}>Create next post</Button>
-              <Button variant="secondary" onClick={() => repurposeCampaign(activeCampaign)}>
-                <Repeat2 size={16} /> Repurpose this brief
-              </Button>
+              <Button variant="secondary" onClick={() => repurposeCampaign(activeCampaign)}><Repeat2 size={16} /> Repurpose this brief</Button>
               <Button variant="secondary" onClick={() => setScreen("Analytics")}>View Analytics</Button>
               <Button variant="secondary" onClick={() => setScreen("Content Library")}>View Content Library</Button>
             </div>
@@ -11723,694 +7506,751 @@ function PostQueue({
         </Card>
       )}
 
-      {queue.length === 0 ? (
-        <Card className="p-8 text-center">
-            <p className="font-semibold">No Ready to Post items yet.</p>
-          <p className="mt-2 text-sm text-muted-foreground">
-            Approve a draft and it will appear here.
-          </p>
-          <Button className="mt-4" onClick={() => setScreen("Review Drafts")}>
-            Review results
-          </Button>
+      {activeTab === "Completed" && visibleQueue.length > 0 && (
+        <Card className="p-4">
+          <div className="flex flex-col justify-between gap-3 md:flex-row md:items-center">
+            <p className="text-sm text-muted-foreground">Completed items are saved in Content Library. Hide or archive them to keep this queue clean.</p>
+            <Button variant="secondary" onClick={clearCompletedFromQueue}>Clear completed from queue</Button>
+          </div>
         </Card>
-      ) : filteredQueue.length === 0 ? (
-        <Card className="p-8 text-center">
-          <p className="font-semibold">No posts match these filters.</p>
-          <p className="mt-2 text-sm text-muted-foreground">
-            {activeFilters
-              ? "Try All platforms or clear another filter."
-              : "Approve a draft and it will appear here."}
-          </p>
-        </Card>
-      ) : (
-        statusSections.map((section) => (
-          <Card key={section.status} className="p-5">
-            <div className="mb-4 flex items-center justify-between gap-3">
-              <div>
-                <h3 className="text-lg font-bold">{section.status}</h3>
-                <p className="mt-1 text-sm text-muted-foreground">
-                  {section.status === "Ready"
-                    ? "Posts ready to publish manually."
-                    : section.status === "Posted"
-                      ? "Published posts stay here for URL and metrics tracking."
-                      : `${section.status} posts.`}
-                </p>
-              </div>
-              <Pill>{section.items.length}</Pill>
-            </div>
-            <div className="grid gap-4">
-              {section.items.map((item) => (
-                <PostQueueCard
-                  key={item.id}
-                  item={item}
-                  campaign={campaigns.find((campaign) => campaign.id === item.campaignId)}
-                  updateQueueItem={updateQueueItem}
-                  mediaPreviewUrl={mediaPreviewUrl}
-                  instagramSandboxConfigured={instagramSandboxConfigured}
-                />
-              ))}
-            </div>
-          </Card>
-        ))
       )}
-    </div>
-  );
-}
 
-function BrandSafetyPanel({
-  post,
-  campaign,
-  onAction,
-  onUpdateCheck,
-  compact = false
-}: {
-  post: GeneratedPost;
-  campaign?: Campaign;
-  onAction?: (instruction: string) => void;
-  onUpdateCheck?: (check: BrandSafetyCheck) => void;
-  compact?: boolean;
-}) {
-  const fallbackCheck = useMemo(
-    () => safetyCheckForPost(post, campaign),
-    [campaign, post]
-  );
-  const [check, setCheck] = useState<BrandSafetyCheck>(fallbackCheck);
-  const [isChecking, setIsChecking] = useState(false);
-  const [hasRequestedAi, setHasRequestedAi] = useState(false);
-  const [showSafetyDetails, setShowSafetyDetails] = useState(!compact);
-
-  useEffect(() => {
-    setCheck(fallbackCheck);
-  }, [fallbackCheck]);
-
-  useEffect(() => {
-    if (hasRequestedAi || fallbackCheck.source === "AI") return;
-
-    let cancelled = false;
-    setHasRequestedAi(true);
-    setIsChecking(true);
-    fetch("/api/brand-safety", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        postCopy: userFacingPostContent(post.content, campaign, post),
-        platform: post.platform,
-        campaign: campaign
-          ? {
-              name: campaign.name,
-              intent: campaign.intent,
-              contentAngle: campaign.contentAngle,
-              details: campaign.idea,
-              mediaNotes: campaign.mediaContext?.notes,
-              mediaAnalysis: campaign.mediaContext?.analysis,
-              knowledgeSources: campaign.sourceLibraryNames ?? post.sourceLibraryNames ?? []
-            }
-          : null
-      })
-    })
-      .then((response) => readJsonResponse(response, "Brand safety check failed"))
-      .then((payload) => {
-        if (cancelled || !payload?.check) return;
-        const nextCheck = payload.check as BrandSafetyCheck;
-        setCheck(nextCheck);
-        onUpdateCheck?.(nextCheck);
-      })
-      .catch((error) => {
-        console.info("[SCC] Brand safety AI check unavailable; using fallback.", error);
-      })
-      .finally(() => {
-        if (!cancelled) setIsChecking(false);
-      });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [campaign, fallbackCheck.source, hasRequestedAi, onUpdateCheck, post]);
-
-  return (
-    <div className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
-      <div className="flex flex-col justify-between gap-2 sm:flex-row sm:items-start">
-        <div>
-          <p className="text-xs font-extrabold uppercase tracking-wide text-muted-foreground">Brand Safety / Claim Check</p>
-          <p className="mt-1 text-sm leading-6 text-muted-foreground">
-            Checks claims, sensitive details, hype, generic language, and platform fit before publishing.
-          </p>
+      <Card className="p-5">
+        <div className="mb-4 flex items-center justify-between gap-3">
+          <div>
+            <h3 className="text-lg font-bold">{activeTab}</h3>
+            <p className="mt-1 text-sm text-muted-foreground">
+              {activeTab === "Active"
+                ? "Approved posts and replies that need manual execution."
+                : activeTab === "Scheduled"
+                  ? "Posts and replies planned for later."
+                  : activeTab === "Completed"
+                    ? "Posted and replied items kept as compact history."
+                    : "Items removed from the active workflow."}
+            </p>
+          </div>
+          <Pill>{visibleQueue.length}</Pill>
         </div>
-        <span className={cn("rounded-md px-3 py-1 text-sm font-bold shadow-sm", safetyStatusClass(check.status))}>
-          {isChecking ? "Checking..." : check.status}
-        </span>
-      </div>
-      <div className="mt-3 rounded-md bg-slate-50 p-3 text-sm">
-        <span className="font-semibold">{check.notes[0] ?? "No obvious safety issues."}</span>
-      </div>
-      {compact && (
-        <button
-          type="button"
-          onClick={() => setShowSafetyDetails((current) => !current)}
-          className="mt-3 text-sm font-bold text-primary"
-        >
-          {showSafetyDetails ? "Hide safety details" : "View safety details"}
-        </button>
-      )}
-      {showSafetyDetails && (
-        <>
-          <div className="mt-3 grid gap-2">
-            {check.notes.map((note) => (
-              <div key={note} className="flex gap-2 rounded-md bg-slate-50 p-2 text-sm">
-                <span className={cn(
-                  "mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-[10px] font-bold",
-                  check.status === "Safe" ? "bg-teal-100 text-primary" : check.status === "Needs review" ? "bg-amber-100 text-amber-800" : "bg-red-100 text-red-700"
-                )}>
-                  {check.status === "Safe" ? "OK" : "!"}
-                </span>
-                <span>{note}</span>
-              </div>
+        {visibleQueue.length === 0 ? (
+          <div className="rounded-lg border border-dashed border-slate-200 p-8 text-center">
+            <p className="font-semibold">
+              {activeTab === "Active"
+                ? "No ready items."
+                : activeTab === "Scheduled"
+                  ? "No scheduled items."
+                  : activeTab === "Completed"
+                    ? "No completed items."
+                    : "No archived items."}
+            </p>
+            <p className="mt-2 text-sm text-muted-foreground">
+              {activeTab === "Active"
+                ? "Approve a draft or reply and it will appear here for manual execution."
+                : "Switch tabs or clear filters to see more queue items."}
+            </p>
+            {activeTab === "Active" && <Button className="mt-4" onClick={() => setScreen("Review Drafts")}>Review drafts</Button>}
+          </div>
+        ) : (
+          <div className="grid gap-4">
+            {visibleQueue.map((item) => (
+              <PostQueueCard
+                key={item.id}
+                item={item}
+                campaign={campaigns.find((campaign) => campaign.id === item.campaignId)}
+                activeTab={activeTab}
+                updateQueueItem={updateAndMessage}
+                deleteQueueItem={deleteQueueItem}
+                setScreen={setScreen}
+                mediaPreviewUrl={mediaPreviewUrl}
+                reviewFeedback={managerFeedbackForItem(reviewFeedback, item.id)}
+                resolveManagerFeedback={resolveManagerFeedback}
+              />
             ))}
           </div>
-          <p className="mt-3 text-xs text-muted-foreground">
-            Source: {check.source === "AI" ? "AI assisted" : "deterministic fallback"} · Last checked {formatShortDateTime(check.checkedAt)}
-          </p>
-        </>
-      )}
-      {onAction && showSafetyDetails && (
-        <div className="mt-4">
-          <p className="text-xs font-bold uppercase text-muted-foreground">Quick actions</p>
-          <div className="mt-2 flex flex-wrap gap-2">
-            {brandSafetyQuickActions.map((action) => (
-              <Button
-                key={action.label}
-                type="button"
-                size="sm"
-                variant="secondary"
-                onClick={() => onAction(action.instruction)}
-              >
-                {action.label}
-              </Button>
-            ))}
-          </div>
-        </div>
-      )}
+        )}
+      </Card>
     </div>
-  );
-}
-
-function QueueFilter({
-  label,
-  children
-}: {
-  label: string;
-  children: React.ReactNode;
-}) {
-  return (
-    <label className="text-sm font-bold text-slate-600">
-      {label}
-      {children}
-    </label>
   );
 }
 
 function PostQueueCard({
   item,
   campaign,
+  activeTab,
   updateQueueItem,
+  deleteQueueItem,
+  setScreen,
   mediaPreviewUrl,
-  instagramSandboxConfigured
+  reviewFeedback,
+  resolveManagerFeedback
 }: {
   item: PostQueueItem;
   campaign?: Campaign;
-  updateQueueItem: (id: string, updates: Partial<PostQueueItem>) => void;
+  activeTab: QueueExecutionTab;
+  updateQueueItem: (id: string, updates: Partial<PostQueueItem>, message: string) => void;
+  deleteQueueItem: (id: string) => void;
+  setScreen: (screen: Screen) => void;
   mediaPreviewUrl: string;
-  instagramSandboxConfigured: boolean;
+  reviewFeedback: ReviewFeedback[];
+  resolveManagerFeedback: (feedbackId: string) => void;
 }) {
-  const [showPreview, setShowPreview] = useState(false);
-  const [copyState, setCopyState] = useState<"idle" | "copied" | "failed">("idle");
-  const [publishForm, setPublishForm] = useState({
-    livePostUrl: item.livePostUrl ?? "",
-    postedAt: toDateTimeLocalValue(item.postedAt),
-    publishNotes: item.publishNotes ?? "",
-    isSandbox: Boolean(item.isSandbox)
-  });
-  const [metricsForm, setMetricsForm] = useState({
-    impressions: String(item.metrics?.impressions ?? ""),
-    likes: String(item.metrics?.likes ?? ""),
-    comments: String(item.metrics?.comments ?? ""),
-    shares: String(item.metrics?.shares ?? ""),
-    saves: String(item.metrics?.saves ?? ""),
-    clicks: String(item.metrics?.clicks ?? "")
-  });
-  const [publishSaved, setPublishSaved] = useState("");
-  useEffect(() => {
-    setPublishForm({
-      livePostUrl: item.livePostUrl ?? "",
-      postedAt: toDateTimeLocalValue(item.postedAt),
-      publishNotes: item.publishNotes ?? "",
-      isSandbox: Boolean(item.isSandbox)
-    });
-    setMetricsForm({
-      impressions: String(item.metrics?.impressions ?? ""),
-      likes: String(item.metrics?.likes ?? ""),
-      comments: String(item.metrics?.comments ?? ""),
-      shares: String(item.metrics?.shares ?? ""),
-      saves: String(item.metrics?.saves ?? ""),
-      clicks: String(item.metrics?.clicks ?? "")
-    });
-  }, [item.id, item.livePostUrl, item.postedAt, item.publishNotes, item.isSandbox, item.metrics]);
-
-  const previewCampaign: Campaign =
-    campaign ?? {
-      id: item.campaignId,
-      name: item.campaignName,
-      idea: "",
-      intent: item.intent,
-      contentAngle: item.contentAngle,
-      platforms: [item.platform],
-      posts: [],
-      createdAt: item.createdAt,
-      profileId: item.profileId,
-      profileName: item.profileName,
-      mediaContext: item.mediaUsed
-        ? {
-            type: item.mediaPublicUrl
-              ? inferMediaKindFromUrl(item.mediaPublicUrl)
-              : undefined,
-            filename: item.mediaAssetName,
-            assetId: item.mediaAssetId,
-            assetName: item.mediaAssetName,
-            publicUrl: item.mediaPublicUrl,
-            storagePath: item.mediaStoragePath
-          }
-        : undefined
-    };
-  const previewPost: GeneratedPost = {
-    id: item.generatedPostId,
-    platform: item.platform,
-    postCopy: item.postCopy ?? item.content,
-    content: item.content,
-    status: "approved",
-    score: 100,
-    generatedBy: campaign?.generatedBy,
-    mediaUsed: item.mediaUsed,
-    rationale: item.rationale,
-    recommendedMediaUse: item.recommendedMediaUse,
-    altText: item.altText,
-    overlayText: item.overlayText,
-    cta: item.cta,
-    hashtags: item.hashtags,
-    firstComment: item.firstComment,
-    carouselIdeas: item.carouselIdeas,
-    shotList: item.shotList,
-    safetyCheck: item.safetyCheck,
-    profileId: item.profileId,
-    profileName: item.profileName
+  const contentType = queueContentType(item);
+  const isReply = contentType === "Reply";
+  const status = normalizeQueueStatus(item.status);
+  const safetyStatus = item.safetyCheck?.status ?? "Safe";
+  const copyLabel = isReply ? "Copy reply" : "Copy caption";
+  const completionLabel = isReply ? "Mark replied" : "Mark posted";
+  const platformUrl = platformUrls[item.platform];
+  const [copied, setCopied] = useState(false);
+  const [showDetails, setShowDetails] = useState(false);
+  const [showComplete, setShowComplete] = useState(false);
+  const [liveUrl, setLiveUrl] = useState(item.livePostUrl || "");
+  const [publishNotes, setPublishNotes] = useState(item.publishNotes || "");
+  const [isSandbox, setIsSandbox] = useState(Boolean(item.isSandbox));
+  const [plannedAt, setPlannedAt] = useState(toDateTimeLocalValue(item.plannedAt));
+  const [postedAt, setPostedAt] = useState(toDateTimeLocalValue(item.postedAt) || toDateTimeLocalValue(new Date().toISOString()));
+  const hasMedia = Boolean(item.mediaUsed || item.mediaPublicUrl || item.mediaAssetName || mediaPreviewUrl);
+  const canDelete = activeTab === "Archived" || isDeletableQueueTestItem(item);
+  const previewCampaign: Campaign = campaign ?? {
+    id: item.campaignId,
+    name: item.campaignName || item.opportunityTitle || "Queued content",
+    idea: item.content,
+    intent: item.intent,
+    contentAngle: item.contentAngle,
+    platforms: [item.platform],
+    posts: [],
+    createdAt: item.createdAt
   };
-  const displayContent = userFacingPostContent(item.content, previewCampaign, previewPost);
-  const details = supportingDetailsFromPost(previewPost);
 
-  async function handleCopy() {
+  async function copyContent() {
     try {
-      await navigator.clipboard.writeText(displayContent);
-      setCopyState("copied");
+      await navigator.clipboard.writeText(item.postCopy || item.content);
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 1500);
     } catch {
-      setCopyState("failed");
+      setCopied(false);
     }
-    window.setTimeout(() => setCopyState("idle"), 1400);
   }
 
-  function openPlatform() {
-    window.open(platformUrls[item.platform], "_blank", "noopener,noreferrer");
-  }
-
-  function downloadMedia() {
-    const mediaUrl = item.mediaPublicUrl || mediaPreviewUrl;
-    if (!item.mediaUsed || !mediaUrl) {
-      setPublishSaved("Media preview unavailable. Re-upload or select from Media Library.");
-      window.setTimeout(() => setPublishSaved(""), 2200);
-      return;
-    }
-
-    const link = document.createElement("a");
-    link.href = mediaUrl;
-    link.download = item.mediaAssetName || `${item.platform.toLowerCase()}-media`;
-    link.target = "_blank";
-    link.rel = "noopener noreferrer";
-    document.body.appendChild(link);
-    link.click();
-    link.remove();
-  }
-
-  function numberFromInput(value: string) {
-    const trimmed = value.trim();
-    if (!trimmed) return undefined;
-    const parsed = Number(trimmed);
-    return Number.isFinite(parsed) ? Math.max(0, Math.round(parsed)) : undefined;
-  }
-
-  function savePublishDetails() {
-    updateQueueItem(item.id, {
-      livePostUrl: publishForm.livePostUrl.trim(),
-      postedAt: publishForm.postedAt ? new Date(publishForm.postedAt).toISOString() : "",
-      publishNotes: publishForm.publishNotes.trim(),
-      isSandbox: publishForm.isSandbox,
-      status: "Posted"
-    });
-    setPublishSaved("Publishing details saved");
-    window.setTimeout(() => setPublishSaved(""), 1400);
-  }
-
-  function saveMetrics() {
-    updateQueueItem(item.id, {
-      metrics: {
-        impressions: numberFromInput(metricsForm.impressions),
-        likes: numberFromInput(metricsForm.likes),
-        comments: numberFromInput(metricsForm.comments),
-        shares: numberFromInput(metricsForm.shares),
-        saves: numberFromInput(metricsForm.saves),
-        clicks: numberFromInput(metricsForm.clicks)
+  function completeItem() {
+    updateQueueItem(
+      item.id,
+      {
+        status: isReply ? "Replied" : "Posted",
+        livePostUrl: liveUrl,
+        postedAt: postedAt ? new Date(postedAt).toISOString() : new Date().toISOString(),
+        publishNotes,
+        isSandbox
       },
-      publishNotes: publishForm.publishNotes.trim(),
-      isSandbox: publishForm.isSandbox
-    });
-    setPublishSaved("Metrics saved");
-    window.setTimeout(() => setPublishSaved(""), 1400);
+      isReply
+        ? "Reply marked as replied and saved to Content Library."
+        : "Post marked as posted and saved to Content Library."
+    );
+    setShowComplete(false);
+  }
+
+  function scheduleItem() {
+    updateQueueItem(
+      item.id,
+      {
+        status: "Scheduled",
+        plannedAt: plannedAt ? new Date(plannedAt).toISOString() : new Date().toISOString()
+      },
+      "Item scheduled and added to the Content Calendar."
+    );
   }
 
   return (
     <div className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
-      <div className="flex flex-col justify-between gap-3 lg:flex-row lg:items-start">
-        <div className="min-w-0">
+      <div className="flex flex-col justify-between gap-4 xl:flex-row xl:items-start">
+        <div className="min-w-0 flex-1">
           <div className="flex flex-wrap gap-2">
+            <Pill>{contentType}</Pill>
             <Pill>{item.platform}</Pill>
-            <Pill>{item.profileName || "No profile"}</Pill>
-            {item.mediaUsed && <Pill>Media: {item.mediaAssetName || campaign?.mediaContext?.assetName || campaign?.mediaContext?.filename || "used"}</Pill>}
-            {item.contentAngle && <Pill>{item.contentAngle}</Pill>}
-            {item.isSandbox && <Pill>Sandbox/test post</Pill>}
+            <Pill>{item.profileName || "Conduit"}</Pill>
+            <Pill>{status}</Pill>
+            {hasMedia && <Pill>Media used</Pill>}
+            {item.isSandbox && <Pill>Sandbox/test</Pill>}
+            <Pill>Safety: {safetyStatus}</Pill>
           </div>
-          <h4 className="mt-3 text-base font-extrabold">{item.campaignName}</h4>
-          {item.intent && (
-            <p className="mt-1 text-sm leading-6 text-muted-foreground">{item.intent}</p>
-          )}
-        </div>
-        <div className="flex flex-wrap gap-2">
-          <select
-            value={normalizeQueueStatus(item.status)}
-            onChange={(event) =>
-              updateQueueItem(item.id, {
-                status: event.target.value as QueueStatus,
-                postedAt:
-                  event.target.value === "Posted" && !item.postedAt
-                    ? new Date().toISOString()
-                    : item.postedAt
-              })
-            }
-            className="h-9 rounded-md border border-input bg-white px-3 text-sm font-semibold outline-none focus:ring-2 focus:ring-ring"
-          >
-            {queueStatuses.map((status) => (
-              <option key={status} value={status}>{status}</option>
-            ))}
-          </select>
-          <Button size="sm" variant="secondary" onClick={() => setShowPreview((current) => !current)}>
-            {showPreview ? "Hide preview" : "Preview"}
-          </Button>
-          <Button size="sm" variant="secondary" onClick={handleCopy}>
-            <Clipboard size={14} /> {copyState === "copied" ? "Copied" : copyState === "failed" ? "Copy failed" : item.platform === "LinkedIn" || item.platform === "X" ? "Copy post" : "Copy caption"}
-          </Button>
-          {item.mediaUsed && (
-            <Button size="sm" variant="secondary" onClick={downloadMedia}>
-              <Download size={14} /> Download media
-            </Button>
-          )}
-          <Button size="sm" variant="secondary" onClick={openPlatform}>
-            <ExternalLink size={14} /> Open {item.platform}
-          </Button>
-          {item.platform === "Instagram" && instagramSandboxConfigured && (
-            <Button size="sm" variant="secondary" disabled title="Dry-run scaffolding is ready; real publishing is disabled.">
-              Publish with Instagram sandbox - coming soon
-            </Button>
-          )}
-        </div>
-      </div>
-
-      <div className="mt-4 rounded-lg border border-slate-200 bg-slate-50 p-4">
-        <p className="whitespace-pre-wrap text-sm leading-6">{displayContent}</p>
-      </div>
-
-      <div className="mt-4 rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
-        <div className="flex flex-col justify-between gap-2 sm:flex-row sm:items-center">
-          <div>
-            <p className="text-xs font-extrabold uppercase tracking-wide text-muted-foreground">Manual posting checklist</p>
-            <p className="mt-1 text-sm text-muted-foreground">Use this before marking the post as Posted.</p>
-          </div>
-          <Pill>{item.platform}</Pill>
-        </div>
-        <div className="mt-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
-          {manualPostingSteps[item.platform].map((step, index) => (
-            <div key={step} className="flex items-center gap-2 rounded-md bg-slate-50 p-2 text-sm">
-              <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-teal-100 text-[10px] font-extrabold text-primary">
-                {index + 1}
-              </span>
-              <span className="font-semibold">{step}</span>
-            </div>
-          ))}
-        </div>
-        {item.mediaUsed && !item.mediaPublicUrl && !mediaPreviewUrl && (
-          <p className="mt-3 rounded-md bg-amber-50 p-3 text-sm font-semibold text-amber-800">
-            Media preview unavailable. Re-upload or select from Media Library.
-          </p>
-        )}
-        <div className="mt-4 flex flex-wrap gap-2">
-          <Button size="sm" variant="secondary" onClick={handleCopy}>
-            <Clipboard size={14} /> {item.platform === "LinkedIn" || item.platform === "X" ? "Copy post" : "Copy caption"}
-          </Button>
-          {item.mediaUsed && (
-            <Button size="sm" variant="secondary" onClick={downloadMedia}>
-              <Download size={14} /> Download media
-            </Button>
-          )}
-          <Button size="sm" variant="secondary" onClick={openPlatform}>
-            <ExternalLink size={14} /> Open {item.platform}
-          </Button>
-        </div>
-      </div>
-
-      <div className="mt-4">
-        <PostReadinessPanel post={previewPost} campaign={previewCampaign} />
-      </div>
-
-      <div className="mt-4">
-        <BrandSafetyPanel
-          post={previewPost}
-          campaign={previewCampaign}
-          onUpdateCheck={(safetyCheck) => updateQueueItem(item.id, { safetyCheck })}
-          onAction={(instruction) => {
-            const saferCopy = applyBrandSafetyQuickFix(displayContent, instruction);
-            const saferPost = {
-              ...previewPost,
-              content: saferCopy,
-              postCopy: saferCopy
-            };
-            updateQueueItem(item.id, {
-              content: saferCopy,
-              postCopy: saferCopy,
-              safetyCheck: runFallbackBrandSafetyCheck(saferCopy, previewCampaign, saferPost)
-            });
-          }}
-        />
-      </div>
-
-      {details.length > 0 && (
-        <div className="mt-4 grid gap-3 md:grid-cols-2">
-          {details.map((detail) => (
-            <div key={detail.label} className="rounded-lg border border-slate-200 bg-slate-50 p-3">
-              <p className="text-xs font-extrabold uppercase tracking-wide text-muted-foreground">{detail.label}</p>
-              <p className="mt-1 whitespace-pre-wrap text-sm leading-6">{detail.value}</p>
-            </div>
-          ))}
-        </div>
-      )}
-
-      <div className="mt-4 grid gap-3 md:grid-cols-[1fr_auto] md:items-end">
-        <div>
-          <FieldLabel label="Planned publish date/time" htmlFor={`planned-${item.id}`} />
-          <input
-            id={`planned-${item.id}`}
-            type="datetime-local"
-            value={toDateTimeLocalValue(item.plannedAt)}
-            onChange={(event) =>
-              updateQueueItem(item.id, {
-                plannedAt: event.target.value
-                  ? new Date(event.target.value).toISOString()
-                  : "",
-                status: event.target.value && item.status === "Ready" ? "Scheduled" : item.status
-              })
-            }
-            className="mt-2 h-10 w-full rounded-md border border-input bg-white px-3 text-sm outline-none focus:ring-2 focus:ring-ring"
-          />
-        </div>
-        <div className="flex flex-wrap gap-2">
-          <Button
-            size="sm"
-            variant="secondary"
-            onClick={() => {
-              const now = new Date().toISOString();
-              setPublishForm((current) => ({
-                ...current,
-                postedAt: current.postedAt || toDateTimeLocalValue(now)
-              }));
-              updateQueueItem(item.id, {
-                status: "Posted",
-                postedAt: item.postedAt || now,
-                isSandbox: publishForm.isSandbox,
-                livePostUrl: publishForm.livePostUrl.trim(),
-                publishNotes: publishForm.publishNotes.trim()
-              });
-            }}
-          >
-            Mark as posted
-          </Button>
-          <Button
-            size="sm"
-            variant="secondary"
-            onClick={() => updateQueueItem(item.id, { status: "Archived" })}
-          >
-            Archive
-          </Button>
-        </div>
-      </div>
-
-      {normalizeQueueStatus(item.status) === "Posted" && (
-        <div className="mt-4 grid gap-4 rounded-lg border border-teal-200 bg-teal-50 p-4 shadow-sm">
-          <div className="flex flex-col justify-between gap-2 sm:flex-row sm:items-center">
-            <div>
-              <p className="font-bold">Manual publishing details</p>
-              <p className="mt-1 text-sm text-teal-900">
-                Paste the live post URL and add performance metrics after posting manually.
-              </p>
-            </div>
-            {publishSaved && <span className="text-sm font-semibold text-primary">{publishSaved}</span>}
-          </div>
-          <label className="flex items-center gap-2 rounded-md border border-teal-200 bg-white p-3 text-sm font-semibold text-teal-900">
-            <input
-              type="checkbox"
-              checked={publishForm.isSandbox}
-              onChange={(event) => {
-                const isSandbox = event.target.checked;
-                setPublishForm((current) => ({ ...current, isSandbox }));
-                updateQueueItem(item.id, { isSandbox });
-              }}
-            />
-            Sandbox/test post
-          </label>
-          <div className="grid gap-3 md:grid-cols-3">
-            <div className="md:col-span-2">
-              <FieldLabel label="Live post URL" htmlFor={`live-url-${item.id}`} />
-              <input
-                id={`live-url-${item.id}`}
-                value={publishForm.livePostUrl}
-                onChange={(event) => setPublishForm((current) => ({ ...current, livePostUrl: event.target.value }))}
-                className="mt-2 h-10 w-full rounded-md border border-input bg-white px-3 text-sm outline-none focus:ring-2 focus:ring-ring"
-                placeholder="https://linkedin.com/posts/..."
-              />
-            </div>
-            <div>
-              <FieldLabel label="Posted date/time" htmlFor={`posted-at-${item.id}`} />
-              <input
-                id={`posted-at-${item.id}`}
-                type="datetime-local"
-                value={publishForm.postedAt}
-                onChange={(event) => setPublishForm((current) => ({ ...current, postedAt: event.target.value }))}
-                className="mt-2 h-10 w-full rounded-md border border-input bg-white px-3 text-sm outline-none focus:ring-2 focus:ring-ring"
-              />
-            </div>
-            <div className="md:col-span-3">
-              <FieldLabel label="Notes" htmlFor={`publish-notes-${item.id}`} />
-              <input
-                id={`publish-notes-${item.id}`}
-                value={publishForm.publishNotes}
-                onChange={(event) => setPublishForm((current) => ({ ...current, publishNotes: event.target.value }))}
-                className="mt-2 h-10 w-full rounded-md border border-input bg-white px-3 text-sm outline-none focus:ring-2 focus:ring-ring"
-                placeholder="Manual posting notes, audience reaction, follow-up ideas..."
-              />
-            </div>
-          </div>
-          <div className="flex justify-end">
-            <Button size="sm" onClick={savePublishDetails}>Save publish details</Button>
-          </div>
-
-          <div className="rounded-lg border border-white/70 bg-white p-4 shadow-sm">
-            <p className="text-xs font-extrabold uppercase tracking-wide text-muted-foreground">Metrics</p>
-            <div className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-6">
-              {[
-                ["impressions", "Impressions"],
-                ["likes", "Likes"],
-                ["comments", "Comments"],
-                ["shares", "Shares/reposts"],
-                ["saves", "Saves"],
-                ["clicks", "Clicks"]
-              ].map(([key, label]) => (
-                <label key={key} className="text-sm font-semibold text-muted-foreground">
-                  {label}
-                  <input
-                    type="number"
-                    min="0"
-                    value={metricsForm[key as keyof typeof metricsForm]}
-                    onChange={(event) =>
-                      setMetricsForm((current) => ({
-                        ...current,
-                        [key]: event.target.value
-                      }))
-                    }
-                    className="mt-2 h-10 w-full rounded-md border border-input bg-white px-3 text-sm outline-none focus:ring-2 focus:ring-ring"
-                  />
-                </label>
-              ))}
-            </div>
-            <div className="mt-3 flex flex-col justify-between gap-3 sm:flex-row sm:items-center">
-              <div className="flex flex-wrap gap-2">
-                <Pill>{metricNumber(item.metrics?.impressions)} impressions</Pill>
-                <Pill>{engagementTotal(item)} engagement</Pill>
-                {item.livePostUrl && <Pill>Live URL saved</Pill>}
+          <h4 className="mt-3 text-lg font-bold">{item.opportunityTitle || item.campaignName}</h4>
+          <p className="mt-2 line-clamp-3 whitespace-pre-wrap text-sm leading-6 text-slate-700">{item.postCopy || item.content}</p>
+          {reviewFeedback.length > 0 && (
+            <div className="mt-3 rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
+              <p className="font-bold">Manager feedback</p>
+              <div className="mt-2 grid gap-2">
+                {reviewFeedback.slice(0, 3).map((feedback) => (
+                  <div key={feedback.id} className="flex flex-col justify-between gap-2 md:flex-row md:items-center">
+                    <p>
+                      <span className="font-semibold">{managerFeedbackStatusLabel(feedback.status)}:</span>{" "}
+                      {feedback.suggestedEdit || feedback.comment || "No comment provided."}
+                    </p>
+                    <Button size="sm" variant="secondary" onClick={() => resolveManagerFeedback(feedback.id)}>Resolve</Button>
+                  </div>
+                ))}
               </div>
-              <Button size="sm" variant="secondary" onClick={saveMetrics}>
-                Update metrics
-              </Button>
             </div>
+          )}
+        </div>
+        <div className="flex flex-wrap gap-2 xl:justify-end">
+          <Button size="sm" variant="secondary" onClick={copyContent}>
+            <Clipboard size={14} /> {copied ? "Copied" : copyLabel}
+          </Button>
+          {!isReply && hasMedia && (
+            <Button size="sm" variant="secondary" onClick={() => item.mediaPublicUrl && window.open(item.mediaPublicUrl, "_blank", "noopener,noreferrer")} disabled={!item.mediaPublicUrl}>
+              <Download size={14} /> Download media
+            </Button>
+          )}
+          <Button size="sm" variant="secondary" onClick={() => window.open(platformUrl, "_blank", "noopener,noreferrer")}>
+            <ExternalLink size={14} /> Open {item.platform}
+          </Button>
+          {activeTab === "Active" && <Button size="sm" onClick={() => setShowComplete((current) => !current)}>{completionLabel}</Button>}
+          {activeTab !== "Archived" && (
+            <Button size="sm" variant="secondary" onClick={() => updateQueueItem(item.id, { status: "Archived" }, "Item archived. It remains available in Content Library.")}>Archive</Button>
+          )}
+          {activeTab === "Archived" && (
+            <Button size="sm" variant="secondary" onClick={() => updateQueueItem(item.id, { status: "Ready" }, "Item restored to Active.")}>Restore to Active</Button>
+          )}
+          {canDelete && (
+            <Button
+              size="sm"
+              variant="danger"
+              onClick={() => {
+                if (window.confirm("Delete this queue item? Content Library records are not removed unless this is only a test queue record.")) {
+                  deleteQueueItem(item.id);
+                }
+              }}
+            >
+              Delete
+            </Button>
+          )}
+          <Button size="sm" variant="secondary" onClick={() => setShowDetails((current) => !current)}>Details</Button>
+        </div>
+      </div>
+
+      {showComplete && (
+        <div className="mt-4 rounded-lg border border-teal-200 bg-teal-50 p-4">
+          <p className="font-bold text-teal-950">{isReply ? "Mark as replied" : "Mark as posted"}</p>
+          <div className="mt-3 grid gap-3 md:grid-cols-2">
+            <FieldLabel label={isReply ? "Live reply URL" : "Live post URL"}>
+              <input value={liveUrl} onChange={(event) => setLiveUrl(event.target.value)} placeholder="https://" className="mt-2 h-10 w-full rounded-md border border-input bg-white px-3 text-sm outline-none focus:ring-2 focus:ring-ring" />
+            </FieldLabel>
+            <FieldLabel label={isReply ? "Replied date/time" : "Posted date/time"}>
+              <input type="datetime-local" value={postedAt} onChange={(event) => setPostedAt(event.target.value)} className="mt-2 h-10 w-full rounded-md border border-input bg-white px-3 text-sm outline-none focus:ring-2 focus:ring-ring" />
+            </FieldLabel>
+          </div>
+          <FieldLabel label="Notes">
+            <textarea value={publishNotes} onChange={(event) => setPublishNotes(event.target.value)} rows={3} className="mt-2 w-full rounded-md border border-input bg-white px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-ring" />
+          </FieldLabel>
+          {!isReply && (
+            <label className="mt-3 flex items-center gap-2 text-sm font-semibold text-teal-950">
+              <input type="checkbox" checked={isSandbox} onChange={(event) => setIsSandbox(event.target.checked)} />
+              Sandbox/test post
+            </label>
+          )}
+          <div className="mt-3 flex flex-wrap gap-2">
+            <Button onClick={completeItem}>{isReply ? "Save replied" : "Save posted"}</Button>
+            <Button variant="secondary" onClick={() => setShowComplete(false)}>Cancel</Button>
+            <Button variant="secondary" onClick={() => setScreen("Content Library")}>View Content Library</Button>
           </div>
         </div>
       )}
 
-      {showPreview && (
-        <div className="mt-4">
-          <PlatformPreview
-            post={previewPost}
-            campaign={previewCampaign}
-            mediaPreviewUrl={mediaPreviewUrl}
+      {status === "Ready" && (
+        <details className="mt-4 rounded-lg border border-slate-200 bg-slate-50 p-3">
+          <summary className="cursor-pointer text-sm font-bold">Schedule</summary>
+          <div className="mt-3 flex flex-col gap-2 md:flex-row md:items-end">
+            <FieldLabel label="Planned date/time">
+              <input type="datetime-local" value={plannedAt} onChange={(event) => setPlannedAt(event.target.value)} className="mt-2 h-10 w-full rounded-md border border-input bg-white px-3 text-sm outline-none focus:ring-2 focus:ring-ring" />
+            </FieldLabel>
+            <Button variant="secondary" onClick={scheduleItem}>Schedule</Button>
+          </div>
+        </details>
+      )}
+
+      {showDetails && (
+        <div className="mt-4 grid gap-3 lg:grid-cols-2">
+          <AnalysisBlock label="Manual workflow" value={(isReply ? manualReplySteps : manualPostingSteps[item.platform]).join("\n")} />
+          <AnalysisBlock label="Package details" value={[
+            item.cta ? `CTA: ${item.cta}` : "",
+            item.hashtags?.length ? `Hashtags: ${item.hashtags.join(" ")}` : "",
+            item.altText ? `Alt text: ${item.altText}` : "",
+            item.overlayText ? `Overlay text: ${item.overlayText}` : "",
+            item.firstComment ? `First comment: ${item.firstComment}` : ""
+          ].filter(Boolean).join("\n") || "No extra package details saved."} />
+          {!isReply && campaign && (
+            <PostReadinessPanel
+              compact
+              readiness={scorePostReadiness(item.postCopy || item.content, item.platform, {
+                id: item.id,
+                platform: item.platform,
+                content: item.content,
+                postCopy: item.postCopy,
+                mediaUsed: item.mediaUsed || Boolean(mediaPreviewUrl),
+                recommendedMediaUse: item.recommendedMediaUse,
+                altText: item.altText,
+                overlayText: item.overlayText,
+                cta: item.cta,
+                hashtags: item.hashtags,
+                firstComment: item.firstComment,
+                carouselIdeas: item.carouselIdeas,
+                shotList: item.shotList,
+                safetyCheck: item.safetyCheck
+              }, campaign)}
+            />
+          )}
+          <BrandSafetyPanel
+            compact
+            fallbackCheck={item.safetyCheck ?? runFallbackBrandSafetyCheck(item.postCopy || item.content, campaign)}
+            requestBody={{
+              postCopy: item.postCopy || item.content,
+              platform: item.platform,
+              campaign: campaign
+                ? {
+                    name: campaign.name,
+                    intent: campaign.intent,
+                    contentAngle: campaign.contentAngle,
+                    details: campaign.idea,
+                    mediaNotes: campaign.mediaContext?.notes,
+                    mediaAnalysis: campaign.mediaContext?.analysis,
+                    knowledgeSources: campaign.sourceLibraryNames ?? [],
+                    claimLibrary: claimContextForGeneration(claimLibraryFromCampaign(campaign))
+                  }
+                : null
+            }}
+            onAction={(instruction) => updateQueueItem(item.id, { publishNotes: `${item.publishNotes ? `${item.publishNotes}\n` : ""}Safety action: ${instruction}` }, "Safety action noted.")}
+            onUpdateCheck={(check) => updateQueueItem(item.id, { safetyCheck: check }, "Brand Safety check updated.")}
           />
+          <div className="lg:col-span-2">
+            <PlatformPreview
+              post={{
+                id: item.generatedPostId,
+                platform: item.platform,
+                content: item.postCopy || item.content,
+                postCopy: item.postCopy || item.content,
+                mediaUsed: item.mediaUsed,
+                status: "approved",
+                score: 0,
+                createdAt: item.createdAt
+              } as GeneratedPost}
+              campaign={previewCampaign}
+              mediaPreviewUrl={mediaPreviewUrl || item.mediaPublicUrl || ""}
+              formatPostContent={userFacingPostContent}
+              extractPostDetail={extractPostDetail}
+            />
+          </div>
         </div>
       )}
     </div>
   );
 }
 
-function toDateTimeLocalValue(value?: string) {
-  if (!value) return "";
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return "";
-  const offset = date.getTimezoneOffset();
-  const localDate = new Date(date.getTime() - offset * 60_000);
-  return localDate.toISOString().slice(0, 16);
+function claimContextForGeneration(claims: ClaimLibraryItem[]) {
+  return {
+    claimIds: claims.map((claim) => claim.id),
+    approvedClaims: claims
+      .filter((claim) => claim.claimType === "Approved claim" || claim.claimType === "Proof-backed")
+      .map((claim) => claim.claimText),
+    needsReviewClaims: claims
+      .filter((claim) => claim.claimType === "Needs review" || claim.claimType === "Customer-sensitive")
+      .map((claim) => claim.claimText),
+    doNotSayClaims: claims
+      .filter((claim) => claim.claimType === "Do not say" || claim.claimType === "Internal only")
+      .map((claim) => claim.claimText),
+    claimDetails: claims.map((claim) => ({
+      claimText: claim.claimText,
+      claimType: claim.claimType,
+      riskLevel: claim.riskLevel,
+      notes: claim.notes
+    }))
+  };
 }
 
-function normalizeQueueStatus(status?: string): QueueStatus {
-  const match = queueStatuses.find(
-    (item) => item.toLowerCase() === String(status ?? "").toLowerCase()
-  );
-  return match ?? "Ready";
+function claimLibraryFromCampaign(campaign?: Campaign): ClaimLibraryItem[] {
+  if (!campaign) return [];
+  const now = campaign.createdAt || new Date().toISOString();
+  const makeClaim = (claimText: string, claimType: ClaimType, index: number): ClaimLibraryItem => ({
+    id: `${campaign.id}-claim-${claimType.toLowerCase().replace(/\W+/g, "-")}-${index}`,
+    claimText,
+    claimType,
+    sourceType: "manual entry",
+    riskLevel: claimType === "Do not say" || claimType === "Internal only" ? "High" : claimType === "Needs review" || claimType === "Customer-sensitive" ? "Medium" : "Low",
+    createdAt: now,
+    updatedAt: now
+  });
+  return [
+    ...(campaign.claimLibraryApprovedClaims ?? []).map((claim, index) => makeClaim(claim, "Approved claim", index)),
+    ...(campaign.claimLibraryNeedsReviewClaims ?? []).map((claim, index) => makeClaim(claim, "Needs review", index)),
+    ...(campaign.claimLibraryDoNotSayClaims ?? []).map((claim, index) => makeClaim(claim, "Do not say", index))
+  ];
+}
+
+function runFallbackBrandSafetyCheck(content: string, campaign?: Campaign, post?: GeneratedPost): BrandSafetyCheck {
+  const notes: string[] = [];
+  const claimMatches: ClaimMatch[] = [];
+  const lower = content.toLowerCase();
+  const claims = claimLibraryFromCampaign(campaign);
+
+  claims.forEach((claim) => {
+    const claimLower = claim.claimText.toLowerCase();
+    const importantWords = claimLower.match(/[a-z0-9]+/g)?.filter((word) => word.length > 4) ?? [];
+    const directMatch = claimLower.length > 12 && lower.includes(claimLower);
+    const fuzzyMatch = importantWords.length >= 3 && importantWords.slice(0, 5).filter((word) => lower.includes(word)).length >= 3;
+    if (!directMatch && !fuzzyMatch) return;
+    const note =
+      claim.claimType === "Approved claim" || claim.claimType === "Proof-backed"
+        ? "Supported by Claim Library."
+        : claim.claimType === "Do not say"
+          ? "Do-not-say claim or similar wording detected."
+          : "Claim needs review.";
+    claimMatches.push({
+      claimId: claim.id,
+      claimText: claim.claimText,
+      claimType: claim.claimType,
+      riskLevel: claim.riskLevel,
+      note,
+      matchedText: claim.claimText
+    });
+  });
+
+  if (/guarantee|always|eliminate|revolutionize|cutting-edge|game-changing|next-gen|supercharge|unlock|elevate/.test(lower)) {
+    notes.push("Vague hype or guarantee language may need review.");
+  }
+  if (/customer|client|confidential|private|nda|facility|plant|site/i.test(content)) {
+    notes.push("Customer or facility detail may need approval.");
+  }
+  if (post?.mediaUsed && /whiteboard|badge|screen|serial|customer/i.test(content)) {
+    notes.push("Media may show sensitive workspace details.");
+  }
+
+  const hasRiskyClaim = claimMatches.some((match) => match.claimType === "Do not say");
+  const hasNeedsReviewClaim = claimMatches.some((match) => match.claimType === "Needs review" || match.claimType === "Customer-sensitive");
+  return {
+    status: hasRiskyClaim ? "Risky" : notes.length > 0 || hasNeedsReviewClaim ? "Needs review" : "Safe",
+    notes,
+    claimMatches,
+    checkedAt: new Date().toISOString(),
+    source: "Fallback"
+  };
+}
+
+function scorePostReadiness(content: string, platform: Platform, post?: Partial<GeneratedPost>, campaign?: Campaign) {
+  const cleanContent = content.trim();
+  const lower = cleanContent.toLowerCase();
+  const items = [
+    {
+      label: "Specific hook",
+      passed: cleanContent.split(/\s+/).length > 8 && !/excited to share|big news|we are thrilled/i.test(cleanContent.slice(0, 120)),
+      suggestion: "Make the first line more specific and opinionated."
+    },
+    {
+      label: "Platform fit",
+      passed:
+        platform === "X"
+          ? cleanContent.length <= 280 || cleanContent.includes("\n")
+          : platform === "Instagram"
+            ? cleanContent.length <= 2200
+            : platform === "TikTok"
+              ? /hook|script|shot/i.test(cleanContent)
+              : cleanContent.length <= 3000,
+      suggestion: "Adjust length and structure for the selected platform."
+    },
+    {
+      label: "Operational specificity",
+      passed: /factory|robot|automation|workflow|operator|machine|sensor|deployment|hardware|floor|process/i.test(cleanContent),
+      suggestion: "Add a concrete factory, workflow, robotics, or operations detail."
+    },
+    {
+      label: "Media fit",
+      passed: !post?.mediaUsed || Boolean(campaign?.mediaContext?.notes || campaign?.mediaContext?.analysis?.description || post?.recommendedMediaUse),
+      suggestion: "Tie the copy more clearly to the attached media."
+    },
+    {
+      label: "Low hype",
+      passed: !/revolutionize|cutting-edge|game-changing|next-gen|supercharge|unlock|elevate|seamless/i.test(lower),
+      suggestion: "Remove generic hype language."
+    },
+    {
+      label: "Claim safety",
+      passed: runFallbackBrandSafetyCheck(cleanContent, campaign, post as GeneratedPost | undefined).status !== "Risky",
+      suggestion: "Remove or source risky claims."
+    }
+  ];
+  const passed = items.filter((item) => item.passed).length;
+  const score = Math.max(35, Math.round((passed / items.length) * 100));
+  return {
+    score,
+    label: score >= 85 ? "Ready" : score >= 65 ? "Good" : "Needs work",
+    items,
+    suggestions: items.filter((item) => !item.passed).map((item) => item.suggestion).slice(0, 3)
+  };
+}
+
+function supportingFieldsFromPost(post: Partial<GeneratedPost>) {
+  return {
+    recommendedMediaUse: post.recommendedMediaUse || extractPostDetail(post.content || "", "Recommended media use"),
+    altText: post.altText || extractPostDetail(post.content || "", "Optional alt text"),
+    overlayText: post.overlayText || extractPostDetail(post.content || "", "Suggested overlay text"),
+    cta: post.cta || extractPostDetail(post.content || "", "CTA"),
+    hashtags: post.hashtags ?? [],
+    firstComment: post.firstComment || "",
+    carouselIdeas: post.carouselIdeas ?? [],
+    shotList: post.shotList ?? []
+  };
+}
+
+function supportingDetailsFromPost(post: GeneratedPost) {
+  const fields = supportingFieldsFromPost(post);
+  return [
+    { label: "Recommended media use", value: fields.recommendedMediaUse },
+    { label: "Alt text", value: fields.altText },
+    { label: "Overlay text", value: fields.overlayText },
+    { label: "CTA", value: fields.cta },
+    { label: "Hashtags", value: fields.hashtags.length ? fields.hashtags.join(" ") : "" },
+    { label: "First comment", value: fields.firstComment },
+    { label: "Carousel ideas", value: fields.carouselIdeas.join("\n") },
+    { label: "Shot list", value: fields.shotList.join("\n") }
+  ].filter((item) => item.value && item.value.trim().length > 0);
+}
+
+function postReadiness(post: GeneratedPost, campaign?: Campaign) {
+  return scorePostReadiness(userFacingPostContent(post.content, campaign, post), post.platform, post, campaign);
+}
+
+function safetyCheckForPost(post: GeneratedPost, campaign?: Campaign) {
+  return post.safetyCheck ?? runFallbackBrandSafetyCheck(userFacingPostContent(post.content, campaign, post), campaign, post);
+}
+
+function brandSafetyRequestBody(post: GeneratedPost, campaign?: Campaign) {
+  return {
+    postCopy: userFacingPostContent(post.content, campaign, post),
+    platform: post.platform,
+    campaign: campaign
+      ? {
+          name: campaign.name,
+          intent: campaign.intent,
+          contentAngle: campaign.contentAngle,
+          details: campaign.idea,
+          mediaNotes: campaign.mediaContext?.notes,
+          mediaAnalysis: campaign.mediaContext?.analysis,
+          knowledgeSources: campaign.sourceLibraryNames ?? post.sourceLibraryNames ?? [],
+          claimLibrary: claimContextForGeneration(claimLibraryFromCampaign(campaign))
+        }
+      : null
+  };
+}
+
+function isCampaignComplete(campaign: Campaign | undefined, queue: PostQueueItem[]) {
+  if (!campaign) return false;
+  const campaignQueue = queue.filter((item) => item.campaignId === campaign.id);
+  const campaignPostsComplete =
+    campaign.posts.length > 0 &&
+    campaign.posts.every((post) => {
+      const queueItem = campaignQueue.find((item) => item.generatedPostId === post.id);
+      const status = queueItem ? normalizeQueueStatus(queueItem.status) : undefined;
+      return post.status === "rejected" || status === "Posted" || status === "Replied" || status === "Archived";
+    });
+  const queueComplete =
+    campaignQueue.length > 0 &&
+    campaignQueue.every((item) => {
+      const status = normalizeQueueStatus(item.status);
+      return status === "Posted" || status === "Replied" || status === "Archived" || Boolean(item.hiddenFromQueue);
+    });
+
+  return campaignPostsComplete || queueComplete;
+}
+
+function isDemoLikeRecord(item?: {
+  id?: string;
+  name?: string;
+  title?: string;
+  campaignName?: string;
+  claimText?: string;
+  profileId?: string;
+  campaignId?: string;
+}) {
+  if (!item) return false;
+  return [
+    item.id,
+    item.name,
+    item.title,
+    item.campaignName,
+    item.claimText,
+    item.profileId,
+    item.campaignId
+  ].some((value) => typeof value === "string" && (/^demo-/i.test(value) || /^Demo -/i.test(value)));
+}
+
+function buildReviewQueueItems(
+  campaigns: Campaign[],
+  opportunities: Opportunity[],
+  profiles: Profile[],
+  postQueue: PostQueueItem[],
+  reviewFeedback: ReviewFeedback[] = []
+) {
+  const queuedIds = new Set(postQueue.map((item) => item.generatedPostId));
+  const queueByGeneratedId = new Map(postQueue.map((item) => [item.generatedPostId, item]));
+  const items: ReviewQueueItem[] = [];
+
+  campaigns.forEach((campaign) => {
+    campaign.posts.forEach((post) => {
+      const queueItem = queueByGeneratedId.get(post.id);
+      const queued = queuedIds.has(post.id);
+      const review = reviewWithDefault(
+        queueItem?.review ?? post.review,
+        post.status === "approved" ? "Approved" : post.status === "rejected" ? "Archived" : "Draft"
+      );
+      const reviewStatus: ReviewWorkflowStatus = queued
+        ? (queueItem?.managerReviewOnly ? review.status : "Ready to Post")
+        : post.status === "rejected"
+          ? "Archived"
+          : review.status;
+
+      items.push({
+        id: `post-${post.id}`,
+        contentType: "Post",
+        platform: post.platform,
+        postingAccount: campaign.profileName || post.profileName || "No posting account",
+        title: campaign.name,
+        reviewer: review.reviewerName || "No reviewer assigned",
+        review,
+        reviewStatus,
+        latestFeedback: review.feedback || "",
+        requestedAt: review.requestedAt || review.reviewedAt || campaign.createdAt,
+        readinessScore: post.score,
+        safetyStatus: post.safetyCheck?.status,
+        queued,
+        queueItem,
+        campaign,
+        post
+      });
+    });
+  });
+
+  opportunities.forEach((opportunity) => {
+    (opportunity.replyDrafts ?? []).forEach((reply) => {
+      const queueItem = queueByGeneratedId.get(reply.id);
+      const queued = queuedIds.has(reply.id);
+      const review = reviewWithDefault(
+        queueItem?.review ?? reply.review,
+        reply.status === "Approved" ? "Approved" : reply.status === "Archived" ? "Archived" : "Draft"
+      );
+      const reviewStatus: ReviewWorkflowStatus = queued
+        ? (queueItem?.managerReviewOnly ? review.status : "Ready to Reply")
+        : reply.status === "Archived"
+          ? "Archived"
+          : review.status;
+      const profile = profiles.find((item) => item.name.toLowerCase().includes("conduit"));
+
+      items.push({
+        id: `reply-${reply.id}`,
+        contentType: "Reply",
+        platform: reply.recommendedPlatform,
+        postingAccount: profile?.name || "Conduit",
+        title: opportunity.title,
+        reviewer: review.reviewerName || "No reviewer assigned",
+        review,
+        reviewStatus,
+        latestFeedback: review.feedback || "",
+        requestedAt: review.requestedAt || review.reviewedAt || reply.updatedAt || reply.createdAt,
+        readinessScore: undefined,
+        safetyStatus: reply.brandSafetyNotes.length > 0 ? "Needs review" : "Safe",
+        queued,
+        queueItem,
+        opportunity,
+        reply
+      });
+    });
+  });
+
+  const existingGeneratedIds = new Set(items.flatMap((item) => [
+    item.post?.id,
+    item.reply?.id
+  ].filter(Boolean) as string[]));
+
+  postQueue.forEach((queueItem) => {
+    if (existingGeneratedIds.has(queueItem.generatedPostId)) return;
+    const latestFeedback = managerFeedbackForItem(reviewFeedback, queueItem.id)[0];
+    if (!latestFeedback) return;
+    const reviewStatus: ReviewWorkflowStatus =
+      latestFeedback.status === "changes_requested"
+        ? "Changes requested"
+        : latestFeedback.status === "approved"
+          ? "Manager approved"
+          : latestFeedback.status === "ready_to_post"
+            ? "Manager marked ready to post"
+            : "Sent for review";
+    const review: ReviewMetadata = {
+      status: reviewStatus,
+      reviewerName: latestFeedback.reviewerName || "Manager",
+      feedback: latestFeedback.comment || latestFeedback.suggestedEdit || "",
+      requestedAt: latestFeedback.createdAt,
+      reviewedAt: latestFeedback.status === "approved" ? latestFeedback.createdAt : undefined
+    };
+
+    items.push({
+      id: `queue-feedback-${queueItem.id}`,
+      contentType: queueContentType(queueItem),
+      platform: queueItem.platform,
+      postingAccount: queueItem.profileName || "Conduit",
+      title: queueItem.opportunityTitle || queueItem.campaignName,
+      reviewer: latestFeedback.reviewerName || "Manager",
+      review,
+      reviewStatus,
+      latestFeedback: review.feedback || "",
+      requestedAt: latestFeedback.createdAt,
+      readinessScore: undefined,
+      safetyStatus: queueItem.safetyCheck?.status,
+      queued: true,
+      queueItem,
+      managerFeedback: latestFeedback,
+      suggestedEdit: latestFeedback.suggestedEdit
+    });
+  });
+
+  return items.sort((a, b) => {
+    const aTime = new Date(a.requestedAt || "").getTime() || 0;
+    const bTime = new Date(b.requestedAt || "").getTime() || 0;
+    return bTime - aTime;
+  });
+}
+
+function reviewQueueItemMatchesFilter(item: ReviewQueueItem, filter: ReviewQueueFilter) {
+  if (filter === "All drafts") return true;
+  if (filter === "Sent for review") return item.reviewStatus === "Sent for review" || item.reviewStatus === "Needs review";
+  if (filter === "Changes requested") return item.reviewStatus === "Changes requested";
+  if (filter === "Revised") return item.reviewStatus === "Revised";
+  if (filter === "Manager approved / ready") {
+    return item.reviewStatus === "Approved" || item.reviewStatus === "Manager approved" || item.reviewStatus === "Manager marked ready to post";
+  }
+  if (filter === "Ready to Post / Ready to Reply") {
+    return (!item.queueItem?.managerReviewOnly && item.queued) || item.reviewStatus === "Ready to Post" || item.reviewStatus === "Ready to Reply";
+  }
+  if (filter === "Archived") return item.reviewStatus === "Archived";
+  return true;
 }
 
 function ResultsEditor({
+  campaigns,
   campaign,
+  setActiveCampaignId,
   campaignComplete,
   rawIdeaIsGeneric,
+  opportunities,
+  setOpportunities,
+  persistOpportunity,
+  profiles,
+  postQueue,
+  queueApprovedReply,
+  queuePostFromReview,
+  sendPostToManagerReview,
+  updateQueueItem,
+  updateCampaignPostFromReview,
+  reviewQueueFilterPreset,
+  reviewFeedback,
+  resolveManagerFeedback,
+  refreshManagerFeedback,
+  captureFeedbackMemory,
+  feedbackMemorySummary,
   updatePost,
   approvePost,
   regeneratePost,
@@ -12425,9 +8265,36 @@ function ResultsEditor({
   startNewPost,
   repurposeCampaign
 }: {
+  campaigns: Campaign[];
   campaign?: Campaign;
+  setActiveCampaignId: (id: string) => void;
   campaignComplete: boolean;
   rawIdeaIsGeneric: boolean;
+  opportunities: Opportunity[];
+  setOpportunities: (items: Opportunity[] | ((current: Opportunity[]) => Opportunity[])) => void;
+  persistOpportunity: (opportunity: Opportunity) => void;
+  profiles: Profile[];
+  postQueue: PostQueueItem[];
+  queueApprovedReply: (opportunity: Opportunity, reply: OpportunityReplyDraft, approvedReply: string, profile?: Profile) => PostQueueItem;
+  queuePostFromReview: (campaign: Campaign, post: GeneratedPost) => Promise<void>;
+  sendPostToManagerReview: (campaign: Campaign, post: GeneratedPost) => Promise<string>;
+  updateQueueItem: (id: string, updates: Partial<PostQueueItem>, options?: { silentActivity?: boolean }) => void;
+  updateCampaignPostFromReview: (campaignId: string, postId: string, updates: Partial<GeneratedPost>) => void;
+  reviewQueueFilterPreset: ReviewQueueFilter;
+  reviewFeedback: ReviewFeedback[];
+  resolveManagerFeedback: (feedbackId: string) => void;
+  refreshManagerFeedback: () => Promise<void>;
+  captureFeedbackMemory: (input: {
+    sourceType: FeedbackMemorySourceType;
+    platform?: Platform;
+    postingAccountId?: string;
+    postingAccountName?: string;
+    originalContent?: string;
+    revisedContent?: string;
+    feedbackText?: string;
+    metadata?: Record<string, unknown>;
+  }) => void;
+  feedbackMemorySummary: FeedbackMemorySummary;
   updatePost: (id: string, updates: Partial<GeneratedPost>) => void;
   approvePost: (post: GeneratedPost) => Promise<void>;
   regeneratePost: (post: GeneratedPost, instruction: string) => Promise<void>;
@@ -12450,6 +8317,9 @@ function ResultsEditor({
   const [showMoreOptions, setShowMoreOptions] = useState(false);
   const [showDebugDetails, setShowDebugDetails] = useState(false);
   const [showBriefContext, setShowBriefContext] = useState(false);
+  const [showReviewQueue, setShowReviewQueue] = useState(false);
+  const [reviewQueueFilter, setReviewQueueFilter] = useState<ReviewQueueFilter>("All drafts");
+  const [reviewQueueMessage, setReviewQueueMessage] = useState("");
 
   useEffect(() => {
     if (campaign?.platforms.length && !campaign.platforms.includes(activePlatform)) {
@@ -12457,6 +8327,11 @@ function ResultsEditor({
       setShowMoreOptions(false);
     }
   }, [activePlatform, campaign]);
+
+  useEffect(() => {
+    setReviewQueueFilter(reviewQueueFilterPreset);
+    setShowReviewQueue(true);
+  }, [reviewQueueFilterPreset]);
 
   if (!campaign) {
     return (
@@ -12476,6 +8351,204 @@ function ResultsEditor({
   const visiblePosts = showMoreOptions ? activePosts : activePosts.slice(0, 1);
   const mediaAngle = campaign.mediaContext?.analysis?.angles?.[0];
   const overlayIdea = campaign.mediaContext?.analysis?.captionIdeas?.[0];
+  const reviewQueueItems = buildReviewQueueItems(campaigns, opportunities, profiles, postQueue, reviewFeedback);
+  const filteredReviewQueueItems = reviewQueueItems.filter((item) => reviewQueueItemMatchesFilter(item, reviewQueueFilter));
+
+  function openReviewQueueItem(item: ReviewQueueItem) {
+    if (item.contentType === "Post" && item.campaign && item.post) {
+      setActiveCampaignId(item.campaign.id);
+      setActivePlatform(item.post.platform);
+      setShowReviewQueue(false);
+      setReviewQueueMessage(`Opened ${item.platform} draft from ${item.title}.`);
+      return;
+    }
+    if (item.contentType === "Reply") {
+      setScreen("Opportunity Inbox");
+    }
+  }
+
+  function updateReplyReviewFromQueue(opportunity: Opportunity, reply: OpportunityReplyDraft, review: ReviewMetadata) {
+    const nextReply: OpportunityReplyDraft = {
+      ...reply,
+      review,
+      updatedAt: new Date().toISOString()
+    };
+    const nextOpportunity = {
+      ...opportunity,
+      replyDrafts: (opportunity.replyDrafts ?? []).map((item) => item.id === reply.id ? nextReply : item),
+      updatedAt: new Date().toISOString()
+    };
+    setOpportunities((current) => current.map((item) => item.id === opportunity.id ? nextOpportunity : item));
+    persistOpportunity(nextOpportunity);
+  }
+
+  function approveReviewItem(item: ReviewQueueItem) {
+    const now = new Date().toISOString();
+    const nextReview: ReviewMetadata = {
+      ...(item.review ?? { status: "Approved" }),
+      status: "Approved",
+      reviewerName: item.reviewer === "No reviewer assigned" ? "Conduit / team" : item.reviewer,
+      reviewedAt: now
+    };
+
+    if (item.contentType === "Post" && item.campaign && item.post) {
+      updateCampaignPostFromReview(item.campaign.id, item.post.id, { review: nextReview });
+      setReviewQueueMessage(`${item.platform} draft approved by ${nextReview.reviewerName}.`);
+      return;
+    }
+
+    if (item.contentType === "Reply" && item.opportunity && item.reply) {
+      updateReplyReviewFromQueue(item.opportunity, item.reply, nextReview);
+      setReviewQueueMessage(`${item.platform} reply approved by ${nextReview.reviewerName}.`);
+    }
+  }
+
+  function archiveReviewItem(item: ReviewQueueItem) {
+    const now = new Date().toISOString();
+    const nextReview: ReviewMetadata = {
+      ...(item.review ?? { status: "Archived" }),
+      status: "Archived",
+      reviewedAt: now
+    };
+
+    if (item.contentType === "Post" && item.campaign && item.post) {
+      updateCampaignPostFromReview(item.campaign.id, item.post.id, { review: nextReview, status: "rejected" });
+      setReviewQueueMessage(`${item.platform} draft archived.`);
+      return;
+    }
+
+    if (item.contentType === "Reply" && item.opportunity && item.reply) {
+      const nextReply: OpportunityReplyDraft = {
+        ...item.reply,
+        status: "Archived",
+        review: nextReview,
+        updatedAt: now
+      };
+      const nextOpportunity: Opportunity = {
+        ...item.opportunity,
+        replyDrafts: (item.opportunity.replyDrafts ?? []).map((reply) =>
+          reply.id === item.reply?.id ? nextReply : reply
+        ),
+        updatedAt: now
+      };
+      setOpportunities((current) =>
+        current.map((opportunity) =>
+          opportunity.id === nextOpportunity.id ? nextOpportunity : opportunity
+        )
+      );
+      persistOpportunity(nextOpportunity);
+      setReviewQueueMessage(`${item.platform} reply archived.`);
+    }
+  }
+
+  async function moveReviewItemToReady(item: ReviewQueueItem) {
+    if (item.contentType === "Post" && item.campaign && item.post) {
+      await queuePostFromReview(item.campaign, item.post);
+      setReviewQueueMessage(`${item.platform} post moved to Ready to Post.`);
+      return;
+    }
+
+    if (item.contentType === "Reply" && item.opportunity && item.reply) {
+      moveReplyToReady(item.opportunity, item.reply);
+      setReviewQueueMessage(`${item.platform} reply moved to Ready to Reply.`);
+    }
+  }
+
+  function regenerateReviewItemFromFeedback(item: ReviewQueueItem) {
+    const feedback = item.latestFeedback.trim();
+    if (!feedback) {
+      openReviewQueueItem(item);
+      return;
+    }
+
+    if (item.contentType === "Post" && item.campaign && item.post) {
+      setActiveCampaignId(item.campaign.id);
+      setActivePlatform(item.post.platform);
+      if (campaign?.id === item.campaign.id) {
+        void regeneratePost(item.post, `Regenerate from founder/team review feedback: ${feedback}`);
+      } else {
+        setReviewQueueMessage("Opened the draft. Run regenerate from feedback after the brief loads.");
+      }
+      return;
+    }
+
+    setScreen("Opportunity Inbox");
+  }
+
+  function acceptSuggestedEditFromQueue(item: ReviewQueueItem) {
+    if (!item.suggestedEdit?.trim()) {
+      setReviewQueueMessage("No suggested edit is available for this item.");
+      return;
+    }
+
+    if (item.queueItem) {
+      updateQueueItem(item.queueItem.id, {
+        content: item.suggestedEdit,
+        postCopy: item.suggestedEdit,
+        review: {
+          ...(item.queueItem.review ?? { status: "Changes requested" }),
+          status: "Revised",
+          reviewerName: item.reviewer,
+          feedback: "Suggested edit accepted. Updated draft available.",
+          reviewedAt: new Date().toISOString()
+        }
+      });
+      captureFeedbackMemory({
+        sourceType: "review feedback",
+        platform: item.queueItem.platform,
+        postingAccountId: item.queueItem.profileId,
+        postingAccountName: item.queueItem.profileName,
+        originalContent: item.queueItem.postCopy || item.queueItem.content,
+        revisedContent: item.suggestedEdit,
+        feedbackText: item.latestFeedback || "Manager suggested edit accepted.",
+        metadata: { contentType: item.contentType, managerFeedbackId: item.managerFeedback?.id }
+      });
+      if (item.managerFeedback) {
+        resolveManagerFeedback(item.managerFeedback.id);
+      }
+      setReviewQueueMessage("Suggested edit accepted. The draft is marked Revised and the manager can review the updated copy.");
+      return;
+    }
+
+    if (item.contentType === "Post" && item.campaign && item.post) {
+      updateCampaignPostFromReview(item.campaign.id, item.post.id, {
+        postCopy: item.suggestedEdit,
+        content: item.suggestedEdit,
+        review: revisedReview(item.review, "Suggested edit accepted. Updated draft available.")
+      });
+      setReviewQueueMessage("Suggested edit accepted on the draft copy.");
+      return;
+    }
+
+    setReviewQueueMessage("Open the source item to apply this suggested edit.");
+  }
+
+  function moveReplyToReady(opportunity: Opportunity, reply: OpportunityReplyDraft) {
+    const approvedReply = reply.approvedReply || reply.shortReply;
+    const profile = profiles.find((item) => item.name.toLowerCase().includes("conduit")) || profiles[0];
+    const nextReview: ReviewMetadata = {
+      ...(reply.review ?? {}),
+      status: "Ready to Reply",
+      reviewerName: reply.review?.reviewerName || "Conduit / team",
+      reviewedAt: new Date().toISOString()
+    };
+    const nextReply = {
+      ...reply,
+      approvedReply,
+      review: nextReview,
+      status: "Approved" as const,
+      updatedAt: new Date().toISOString()
+    };
+    const nextOpportunity = {
+      ...opportunity,
+      replyDrafts: (opportunity.replyDrafts ?? []).map((item) => item.id === reply.id ? nextReply : item),
+      relatedPostIds: uniqueStrings([...(opportunity.relatedPostIds ?? []), nextReply.id]),
+      updatedAt: new Date().toISOString()
+    };
+    setOpportunities((current) => current.map((item) => item.id === opportunity.id ? nextOpportunity : item));
+    persistOpportunity(nextOpportunity);
+    queueApprovedReply(nextOpportunity, nextReply, approvedReply, profile);
+  }
 
   if (campaignComplete) {
     return (
@@ -12537,6 +8610,73 @@ function ResultsEditor({
       )}
 
       <Card className="p-5">
+        <div className="flex flex-col justify-between gap-3 lg:flex-row lg:items-start">
+          <div>
+            <p className="text-xs font-extrabold uppercase tracking-wide text-primary">Review Queue</p>
+            <h3 className="mt-1 text-xl font-extrabold tracking-tight">Founder / team review</h3>
+            <p className="mt-1 max-w-3xl text-sm leading-6 text-muted-foreground">
+              Manage posts and replies that need review, have changes requested, or are approved but not yet in Ready to Post / Ready to Reply.
+            </p>
+          </div>
+          <Button size="sm" variant="secondary" onClick={() => setShowReviewQueue((current) => !current)}>
+            {showReviewQueue ? "Hide queue" : "Show queue"}
+          </Button>
+          <Button size="sm" variant="secondary" onClick={() => void refreshManagerFeedback()}>
+            Refresh manager feedback
+          </Button>
+        </div>
+        {reviewQueueMessage && (
+          <div className="mt-4 rounded-md border border-teal-200 bg-teal-50 p-3 text-sm font-semibold text-teal-900">
+            {reviewQueueMessage}
+          </div>
+        )}
+        {showReviewQueue && (
+          <div className="mt-4 space-y-4">
+            <div className="flex flex-wrap gap-2">
+              {reviewQueueFilters.map((filter) => {
+                const count = reviewQueueItems.filter((item) => reviewQueueItemMatchesFilter(item, filter)).length;
+                return (
+                  <button
+                    key={filter}
+                    type="button"
+                    onClick={() => setReviewQueueFilter(filter)}
+                    className={cn(
+                      "rounded-md border px-3 py-2 text-sm font-bold transition",
+                      reviewQueueFilter === filter
+                        ? "border-primary bg-primary text-primary-foreground"
+                        : "border-slate-200 bg-white text-slate-600 hover:border-primary/40 hover:text-foreground"
+                    )}
+                  >
+                    {filter} {count > 0 ? `(${count})` : ""}
+                  </button>
+                );
+              })}
+            </div>
+            {filteredReviewQueueItems.length === 0 ? (
+              <div className="rounded-lg border border-slate-200 bg-slate-50 p-5 text-sm text-muted-foreground">
+                No review items match this filter.
+              </div>
+            ) : (
+              <div className="grid gap-3">
+                {filteredReviewQueueItems.map((item) => (
+                  <ReviewQueueCard
+                    key={item.id}
+                    item={item}
+                    onOpen={() => openReviewQueueItem(item)}
+                    onRegenerateFromFeedback={() => regenerateReviewItemFromFeedback(item)}
+                    onApproveReview={() => approveReviewItem(item)}
+                    onMoveToReady={() => void moveReviewItemToReady(item)}
+                    onArchive={() => archiveReviewItem(item)}
+                    onAcceptSuggestedEdit={() => acceptSuggestedEditFromQueue(item)}
+                  />
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+      </Card>
+
+      <Card className="p-5">
         <div className="flex flex-col justify-between gap-3 md:flex-row md:items-start">
           <div>
             <p className="text-xs font-extrabold uppercase tracking-wide text-primary">Brief context</p>
@@ -12546,6 +8686,11 @@ function ResultsEditor({
             </p>
           </div>
           <div className="flex flex-wrap gap-2">
+            {campaign.mediaContext?.assetId && (
+              <Button size="sm" variant="secondary" onClick={() => setScreen("Media Library")}>
+                Open media asset
+              </Button>
+            )}
             <Button size="sm" variant="secondary" onClick={() => setShowBriefContext((current) => !current)}>
               {showBriefContext ? "Hide details" : "View details"}
             </Button>
@@ -12568,7 +8713,7 @@ function ResultsEditor({
             value={availablePlatforms.join(", ")}
           />
           <BriefItem
-            label="Media used"
+            label={campaign.mediaContext?.assetId ? "Created from media asset" : "Media used"}
             value={
               campaign.mediaContext?.filename
                 ? campaign.mediaContext.assetName || campaign.mediaContext.filename
@@ -12723,6 +8868,9 @@ function ResultsEditor({
                 regeneratePost={regeneratePost}
                 repurposePost={repurposePost}
                 approvePost={approvePost}
+                sendPostToManagerReview={sendPostToManagerReview}
+                captureFeedbackMemory={captureFeedbackMemory}
+                feedbackMemorySummary={feedbackMemorySummary}
                 isRegenerating={regeneratingPostId === post.id}
                 isApproving={approvingPostId === post.id}
                 mediaPreviewUrl={mediaPreviewUrl}
@@ -12745,6 +8893,9 @@ function PostEditor({
   regeneratePost,
   repurposePost,
   approvePost,
+  sendPostToManagerReview,
+  captureFeedbackMemory,
+  feedbackMemorySummary,
   isRegenerating,
   isApproving,
   mediaPreviewUrl,
@@ -12758,6 +8909,18 @@ function PostEditor({
   regeneratePost: (post: GeneratedPost, instruction: string) => Promise<void>;
   repurposePost: (campaign: Campaign, post: GeneratedPost) => void;
   approvePost: (post: GeneratedPost) => Promise<void>;
+  sendPostToManagerReview: (campaign: Campaign, post: GeneratedPost) => Promise<string>;
+  captureFeedbackMemory: (input: {
+    sourceType: FeedbackMemorySourceType;
+    platform?: Platform;
+    postingAccountId?: string;
+    postingAccountName?: string;
+    originalContent?: string;
+    revisedContent?: string;
+    feedbackText?: string;
+    metadata?: Record<string, unknown>;
+  }) => void;
+  feedbackMemorySummary: FeedbackMemorySummary;
   isRegenerating: boolean;
   isApproving: boolean;
   mediaPreviewUrl: string;
@@ -12770,9 +8933,16 @@ function PostEditor({
   const [showPrevious, setShowPrevious] = useState(false);
   const [showWhy, setShowWhy] = useState(false);
   const [showPackageDetails, setShowPackageDetails] = useState(false);
+  const [managerReviewUrlValue, setManagerReviewUrlValue] = useState("");
+  const [managerReviewCopyState, setManagerReviewCopyState] = useState<"idle" | "copied" | "failed">("idle");
   const displayContent = userFacingPostContent(post.content, campaign, post);
+  const [editBaseline, setEditBaseline] = useState(displayContent);
   const details = supportingDetailsFromPost(post);
   const readiness = postReadiness(post, campaign);
+  const review = reviewWithDefault(
+    post.review,
+    post.status === "approved" ? "Ready to Post" : post.status === "rejected" ? "Archived" : "Draft"
+  );
   const statusStyle: Record<PostStatus, string> = {
     draft: "bg-muted text-muted-foreground",
     approved: "bg-teal-100 text-teal-800",
@@ -12795,9 +8965,28 @@ function PostEditor({
     }
 
     await regeneratePost(post, regenerateInstruction);
+    if (shouldMarkDraftRevised(review.status)) {
+      updatePost(post.id, { review: revisedReview(review) });
+    }
     setRegenerateInstruction("");
     setShowRegenerate(false);
     setMode("edit");
+  }
+
+  async function handleSendToManagerReview() {
+    const url = await sendPostToManagerReview(campaign, post);
+    setManagerReviewUrlValue(url);
+  }
+
+  async function copyManagerReviewUrl() {
+    if (!managerReviewUrlValue) return;
+    try {
+      await navigator.clipboard.writeText(managerReviewUrlValue);
+      setManagerReviewCopyState("copied");
+    } catch {
+      setManagerReviewCopyState("failed");
+    }
+    window.setTimeout(() => setManagerReviewCopyState("idle"), 1400);
   }
 
   return (
@@ -12825,11 +9014,28 @@ function PostEditor({
               Media: {campaign.mediaContext?.assetName || campaign.mediaContext?.filename || "used"}
             </Pill>
           )}
+          {post.contentOrigin && (
+            <Pill>{post.contentOrigin}</Pill>
+          )}
           <span className={cn("rounded-md px-2.5 py-1 text-xs font-bold uppercase shadow-sm", statusStyle[post.status])}>
             {post.status}
           </span>
         </div>
         <div className="flex flex-wrap items-center gap-2">
+          {(post.contentOrigin === "Manually written" || post.contentOrigin === "AI-improved from manual draft") && (
+            <Button
+              size="sm"
+              variant="secondary"
+              onClick={() => {
+                setRegenerateInstruction(
+                  "Improve this manual draft while preserving the core point. Make it more specific, more Conduit, less generic, and keep the final copy platform-native."
+                );
+                setShowRegenerate(true);
+              }}
+            >
+              Improve with AI
+            </Button>
+          )}
           <div className="flex rounded-md border border-slate-200 bg-slate-50 p-1 shadow-inner">
             {(["edit", "preview"] as const).map((item) => (
               <button
@@ -12854,30 +9060,58 @@ function PostEditor({
       {mode === "edit" ? (
         <textarea
           value={displayContent}
+          onFocus={() => setEditBaseline(displayContent)}
+          onBlur={() => {
+            if (editBaseline.trim() && editBaseline.trim() !== displayContent.trim()) {
+              captureFeedbackMemory({
+                sourceType: "edit",
+                platform: post.platform,
+                postingAccountId: post.profileId ?? campaign.profileId,
+                postingAccountName: post.profileName ?? campaign.profileName,
+                originalContent: editBaseline,
+                revisedContent: displayContent,
+                feedbackText: "Manual edit to post copy."
+              });
+              setEditBaseline(displayContent);
+            }
+          }}
           onChange={(event) => {
             const nextCopy = event.target.value;
             const nextPost = { ...post, postCopy: nextCopy, content: nextCopy };
+            const nextReview = shouldMarkDraftRevised(review.status)
+              ? revisedReview(review)
+              : post.review;
             updatePost(post.id, {
               postCopy: nextCopy,
               content: nextCopy,
+              review: nextReview,
               safetyCheck: runFallbackBrandSafetyCheck(nextCopy, campaign, nextPost)
             });
           }}
-          className="min-h-[240px] w-full rounded-lg border border-input bg-white p-5 text-base leading-7 shadow-inner outline-none focus:ring-2 focus:ring-ring"
+          className="min-h-60 w-full rounded-lg border border-input bg-white p-5 text-base leading-7 shadow-inner outline-none focus:ring-2 focus:ring-ring"
         />
       ) : (
         <PlatformPreview
           post={post}
           campaign={campaign}
           mediaPreviewUrl={mediaPreviewUrl}
+          formatPostContent={userFacingPostContent}
+          extractPostDetail={extractPostDetail}
         />
       )}
       <div className="mt-4">
         <PostReadinessPanel
-          post={post}
-          campaign={campaign}
+          readiness={readiness}
           compact
           onImprove={(instruction) => {
+            captureFeedbackMemory({
+              sourceType: "readiness action",
+              platform: post.platform,
+              postingAccountId: post.profileId ?? campaign.profileId,
+              postingAccountName: post.profileName ?? campaign.profileName,
+              originalContent: displayContent,
+              feedbackText: instruction
+            });
             setRegenerateInstruction(instruction);
             setShowRegenerate(true);
           }}
@@ -12885,16 +9119,54 @@ function PostEditor({
       </div>
       <div className="mt-4">
         <BrandSafetyPanel
-          post={post}
-          campaign={campaign}
+          fallbackCheck={safetyCheckForPost(post, campaign)}
+          requestBody={brandSafetyRequestBody(post, campaign)}
           compact
           onUpdateCheck={(safetyCheck) => updatePost(post.id, { safetyCheck })}
           onAction={(instruction) => {
+            captureFeedbackMemory({
+              sourceType: "safety action",
+              platform: post.platform,
+              postingAccountId: post.profileId ?? campaign.profileId,
+              postingAccountName: post.profileName ?? campaign.profileName,
+              originalContent: displayContent,
+              feedbackText: instruction
+            });
             setRegenerateInstruction(instruction);
             setShowRegenerate(true);
           }}
         />
       </div>
+      <ReviewWorkflowPanel
+        className="mt-4"
+        review={review}
+        contentKind="Post"
+        onChange={(nextReview) => updatePost(post.id, { review: nextReview })}
+        onRegenerateFromFeedback={(feedback) => {
+          setRegenerateInstruction(`Regenerate from founder/team review feedback: ${feedback}`);
+          setShowRegenerate(true);
+        }}
+      />
+      {managerReviewUrlValue && (
+        <div className="mt-4 rounded-lg border border-teal-200 bg-teal-50 p-4 text-sm text-teal-950">
+          <p className="font-extrabold">Manager review link ready</p>
+          <p className="mt-1 text-teal-900">Share this scoped link. Managers can review this draft, comment, suggest edits, approve, or mark it ready to post.</p>
+          <div className="mt-3 flex flex-col gap-2 sm:flex-row">
+            <input
+              readOnly
+              value={managerReviewUrlValue}
+              className="min-w-0 flex-1 rounded-md border border-teal-200 bg-white px-3 py-2 text-sm"
+              aria-label="Manager review link"
+            />
+            <Button size="sm" variant="secondary" onClick={copyManagerReviewUrl}>
+              {managerReviewCopyState === "copied" ? "Copied" : managerReviewCopyState === "failed" ? "Copy failed" : "Copy link"}
+            </Button>
+            <Button size="sm" variant="secondary" onClick={() => window.open(managerReviewUrlValue, "_blank", "noopener,noreferrer")}>
+              Open link
+            </Button>
+          </div>
+        </div>
+      )}
       {details.length > 0 && (
         <div className="mt-4 rounded-lg border border-slate-200 bg-slate-50 p-3">
           <button
@@ -12929,6 +9201,7 @@ function PostEditor({
             <AnalysisBlock label="Posting Account" value={post.profileName ? `${post.profileName} · ${post.profileType}` : campaign.profileName || "No saved Posting Account"} />
             <AnalysisBlock label="Simple style" value={(campaign.simpleStyleChips ?? []).length > 0 ? `${(campaign.simpleStyleChips ?? []).join(", ")}. These guided tone lightly without changing facts or who is speaking.` : "Conduit default."} />
             <AnalysisBlock label="Voice Influence" value={(campaign.voiceInfluenceNames ?? []).join(", ") || "No extra internal voices. Posting Account and Brand Voice Rules carried the voice."} />
+            <AnalysisBlock label="Profile voice sources" value={(campaign.voiceExampleTitles ?? []).length > 0 ? `${(campaign.voiceExampleTitles ?? []).join(", ")} influenced cadence, structure, and phrasing. These labels show whether learning came from notes, pasted examples, screenshots, fetched website content, or synced sources. Owned/internal sources guide voice; external inspiration sources guide format/style only and never facts, claims, identity, or wording.` : "No analyzed profile source content or manual voice examples were selected for this draft."} />
             <AnalysisBlock label="Inspiration / Reference" value={(campaign.inspirationProfileNames ?? []).length > 0 ? `${(campaign.inspirationProfileNames ?? []).join(", ")}. These influenced format/style only, not facts or claims.` : "No external inspiration. If used, these only shape format and should never be copied."} />
             <AnalysisBlock label="Template" value={campaign.campaignTemplate || "No template saved"} />
             <AnalysisBlock label="Content angle" value={campaign.contentAngle || "Not saved"} />
@@ -12937,7 +9210,18 @@ function PostEditor({
             <AnalysisBlock label="Media notes" value={campaign.mediaContext?.notes || "No media notes."} />
             <AnalysisBlock label="AI media analysis" value={campaign.mediaContext?.analysis?.description || "No media analysis."} />
             <AnalysisBlock label="Company Knowledge" value={(post.sourceLibraryNames ?? campaign.sourceLibraryNames ?? []).join(", ") || "No Company Knowledge items."} />
+            <AnalysisBlock
+              label="Claim Library"
+              value={
+                (post.safetyCheck?.claimMatches ?? []).some((match) => match.claimType === "Approved claim" || match.claimType === "Proof-backed")
+                  ? `Approved claim support: ${(post.safetyCheck?.claimMatches ?? []).filter((match) => match.claimType === "Approved claim" || match.claimType === "Proof-backed").map((match) => match.claimText).join("; ")}`
+                  : (campaign.claimLibraryApprovedClaims ?? []).length > 0
+                    ? `Generation was guided by approved claims like: ${(campaign.claimLibraryApprovedClaims ?? []).slice(0, 2).join("; ")}`
+                    : "No approved Claim Library guidance saved for this brief."
+              }
+            />
             <AnalysisBlock label="Brand Voice Rules" value="Global Brand Voice Rules and Conduit truth override external inspiration." />
+            <AnalysisBlock label="Feedback Memory" value={feedbackMemorySummary.enabled && feedbackMemorySummary.topPreferences.length > 0 ? `Applied learned preferences: ${feedbackMemorySummary.topPreferences.slice(0, 3).join("; ")}.` : "No Feedback Memory preferences applied."} />
             <AnalysisBlock label="Approved examples" value="Recent approved examples for this profile may be used as style examples when enabled." />
             <AnalysisBlock label="Brief type" value={campaign.repurposedFrom ? `Repurposed from ${campaign.repurposedFrom.label}` : campaign.campaignType ?? "Original"} />
           </div>
@@ -13000,7 +9284,17 @@ function PostEditor({
         <Button
           variant="secondary"
           onClick={() => {
-            setRegenerateInstruction("Make it more Conduit: more specific, grounded in factory automation and real operations, less hypey, more direct, and closer to the selected brief and media context.");
+            const instruction = "Make it more Conduit: more specific, grounded in factory automation and real operations, less hypey, more direct, and closer to the selected brief and media context.";
+            captureFeedbackMemory({
+              sourceType: "regenerate",
+              platform: post.platform,
+              postingAccountId: post.profileId ?? campaign.profileId,
+              postingAccountName: post.profileName ?? campaign.profileName,
+              originalContent: displayContent,
+              feedbackText: instruction,
+              metadata: { quickAction: "Make it more Conduit" }
+            });
+            setRegenerateInstruction(instruction);
             setShowRegenerate(true);
           }}
         >
@@ -13011,6 +9305,9 @@ function PostEditor({
           onClick={() => setShowRegenerate((current) => !current)}
         >
           <Sparkles size={16} /> Regenerate
+        </Button>
+        <Button variant="secondary" onClick={() => void handleSendToManagerReview()}>
+          Send to manager for feedback
         </Button>
         {post.status === "approved" && (
           <Button variant="secondary" onClick={() => repurposePost(campaign, post)}>
@@ -13047,31 +9344,5 @@ function PostEditor({
         </Button>
       </div>
     </Card>
-  );
-}
-
-function LayerBlock({
-  title,
-  value,
-  detail
-}: {
-  title: string;
-  value: string;
-  detail: string;
-}) {
-  return (
-    <div className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
-      <p className="text-xs font-extrabold uppercase tracking-wide text-muted-foreground">{title}</p>
-      <p className="mt-2 font-semibold">{value}</p>
-      <p className="mt-1 text-sm leading-6 text-muted-foreground">{detail}</p>
-    </div>
-  );
-}
-
-function Pill({ children }: { children: React.ReactNode }) {
-  return (
-    <span className="inline-flex items-center rounded-md border border-slate-200 bg-slate-50 px-2.5 py-1 text-xs font-bold text-slate-600">
-      {children}
-    </span>
   );
 }
