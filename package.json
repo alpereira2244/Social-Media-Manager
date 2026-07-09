@@ -7,6 +7,7 @@
     "build": "next build",
     "start": "next start",
     "lint": "next lint",
+    "smoke:workflow": "node scripts/workflow-smoke-test.mjs",
     "supabase:smoke": "node --env-file=.env.local scripts/supabase-smoke-test.mjs"
   },
   "dependencies": {

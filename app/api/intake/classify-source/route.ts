@@ -387,7 +387,20 @@ export async function POST(request: Request) {
     }
 
     const parsed = parseJson(extractOutputText(await response.json()));
-    return NextResponse.json({ ok: true, generatedBy: "AI", classification: parsed ?? fallback });
+    const aiClassification = parsed ?? fallback;
+    const classification = fallback.isSocial
+      ? {
+          ...aiClassification,
+          sourceKind: fallback.sourceKind,
+          recommendedDestination: fallback.recommendedDestination,
+          status: "Saved link only",
+          detectedPlatform: fallback.detectedPlatform,
+          isSocial: true,
+          canFetchWebsite: false,
+          recommendedNextAction: fallback.recommendedNextAction
+        }
+      : aiClassification;
+    return NextResponse.json({ ok: true, generatedBy: "AI", classification });
   } catch {
     return NextResponse.json({ ok: true, generatedBy: "Fallback", classification: fallback });
   }
